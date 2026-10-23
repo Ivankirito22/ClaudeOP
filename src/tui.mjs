@@ -84,6 +84,7 @@ export function start(cwd = process.cwd()) {
       : s.auth.loggedIn ? `{green-fg}● sesión ${s.auth.method || 'activa'}{/}` : '{red-fg}● sin login{/}';
     const live = s.busy
       ? `${SPIN[spin % SPIN.length]} {${COLOR[s.active?.tier || 'other']}-fg}${s.active ? s.active.tier : 'pensando'}${s.active?.agent ? ' · ' + s.active.agent : ''}{/}`
+      : s.plan ? '{yellow-fg}plan esperando: Enter ejecuta · x cancela{/}'
       : s.routing ? '{green-fg}Haiku leyendo tu frase…{/}'
       : s.pending?.main ? `{${COLOR[s.pending.main]}-fg}próxima: ${s.pending.main}{/}` : s.queueRunning ? '{yellow-fg}cola…{/}' : '{gray-fg}en espera{/}';
     const where = blessed.escape(path.basename(cwd) || cwd) + (s.stack ? ` {gray-fg}(${blessed.escape(s.stack)}){/}` : '');

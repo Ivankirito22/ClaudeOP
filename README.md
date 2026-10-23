@@ -73,7 +73,7 @@ Además: optimizar, limpiar código muerto, CLAUDE.md, explicar, tests, document
 ### Subagentes
 
 - **Base (9):** `explorador`, `limpiador`, `probador`, `documentador`, `investigador` (Haiku) · `revisor`, `depurador`, `verificador` (Sonnet) · `arquitecto` (Opus).
-- **Especialistas según tu proyecto** (se detectan solos y solo se cargan los que encajan, porque cada subagente listado cuesta tokens en cada petición): `frontend` (React/Vue/Next…), `backend` (Express/Nest/FastAPI/Flask…), `blender` (`.blend` o scripts con `import bpy`), `juego` (Godot/Unity/Unreal), `java` (Maven/Gradle).
+- **Especialistas bajo demanda (16):** `python`, `cpp` (C/C++), `csharp` (C#/.NET/Unity), `java`, `node`, `web` (HTML/CSS), `frontend` (React/Vue/TS…), `backend` (APIs), `sql`, `go`, `rust`, `php`, `mobile` (Android/iOS/Flutter), `shell` (Bash/PowerShell/Docker/CI), `blender` (bpy) y `juego` (Godot/Unity/Unreal). **No están siempre activos** (cada subagente listado cuesta tokens): aparecen solo en la instrucción cuya tarea toca su tecnología. Haiku lo decide al leer tu frase («créame un script en Python» → `python`); si no dices ninguna tecnología, entran como mucho los 2 que detecta el proyecto (por `package.json`, `requirements.txt`, `CMakeLists.txt`, extensiones…). Se anuncian en el chat («🧩 Especialistas para esta tarea…»). `/especialistas` los lista.
 - **Tuyos:** en `.claude-router.json` (ver más abajo).
 
 ## Red de seguridad (git)
@@ -114,7 +114,7 @@ Cada tarea no trivial empieza con una línea de "qué es hecho" y termina compro
 ## Optimización de tokens
 
 - Subagentes con respuestas **cortas**; los tests solo reportan fallos.
-- Solo se cargan los especialistas que tu stack necesita.
+- Los especialistas solo se cargan en la instrucción que los necesita.
 - Flags de caché del prompt (`--exclude-dynamic-system-prompt-sections`) y `--system-prompt-snapshot off` para que los cambios de perfil o nombre apliquen al reanudar.
 - Perfil **eco**: las preguntas cortas van enteras a Haiku. Si dices “sigue fallando…” o pides un rediseño grande, escala solo a `arquitecto`.
 - Aviso cuando Sonnet edita 4+ veces él solo sin delegar.
@@ -151,8 +151,12 @@ Cuando escribes algo, **Haiku lee tu frase** (un par de segundos, casi sin gasto
 - Además, Sonnet lleva el catálogo de flujos en su política para imitarlos en lo que se escape.
 - `!` al principio envía tu frase literal, sin enrutar. `/autoflujos off` desactiva todo esto.
 
+### Plan previo con checks
+
+Antes de ejecutar un trabajo te enseña **qué va a hacer**, con todo marcado: los flujos elegidos, los pasos (explorar, documentación, plan con arquitecto, implementar, limpieza, probar, revisar, documentar, verificar…) y los especialistas que entran. Desmarcas lo que no te interesa (un flujo entero, un paso o un especialista) y pulsas **Ejecutar plan** (o Enter); lo desmarcado le llega a Claude como «NO hagas esto». Esc o **Cancelar** no ejecuta nada. En el modo terminal: escribe los números para marcar/desmarcar, Enter ejecuta, `x` cancela. Las preguntas, los cambios pequeños y las frases con `!` no piden plan. `/plan off` lo desactiva (se guarda).
+
 Comandos: `/feature /bugprofundo /refactor /decidir /auditoria /pulir /rendimiento /release /optimizar /limpiar /md /explicar /probar /tests /documentar /bug /revisar /seguridad /commit /plugins /investigar /rapido /profundo /condensar`
-`/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /auto-compactar /continuar /nombre /presupuesto /autoflujos /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
+`/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /auto-compactar /continuar /nombre /presupuesto /autoflujos /plan /especialistas /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
 
 ## Personalizar (acciones, subagentes y permisos tuyos)
 

@@ -1,6 +1,8 @@
 // Reconoce, en lo que escribes con tus palabras, los flujos que ya existen ("optimiza el código" → Optimizar proyecto)
 // y compone varias acciones en UNA sola instrucción. Todo local y gratis: no llama a ningún modelo.
 
+import { SPEC_KEYS, SPEC_DESC, specialistsFor } from './stack.mjs';
+
 export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 // weak: solo cuenta si aparece al principio de una frase de 6+ palabras que no es pregunta (verbos muy genéricos: "haz", "añade"…; así un cambio pequeño no dispara un flujo grande)
@@ -132,11 +134,13 @@ export const ROUTER_MARK = 'enrutador de un asistente de programación';
 export function routerPrompt(text, actions) {
   const list = actions.map((a) => `${a.cmd}: ${FLOW_DESC[a.cmd] || a.label}`).join('\n');
   return `Eres el ${ROUTER_MARK}. Lee la petición del usuario (puede tener faltas de ortografía, jerga, mezcla de idiomas o estar mal redactada: entiende lo que quiere decir) y responde SOLO con un JSON en una línea, sin texto extra ni explicaciones:
-{"kind":"pregunta|pequeno|tarea","flows":["/comando",...]}
+{"kind":"pregunta|pequeno|tarea","flows":["/comando",...],"tech":["clave",...]}
 - kind: "pregunta" = solo quiere información o una explicación; "pequeno" = un cambio trivial (un archivo, pocas líneas); "tarea" = cualquier otra cosa que implique construir, cambiar, arreglar, optimizar, analizar o planificar.
 - flows: los flujos de esta lista que encajan con lo que PIDE (puede haber varios; [] si ninguno encaja). No inventes comandos.
+- tech: las tecnologías/lenguajes/herramientas con las que HAY QUE TRABAJAR para hacer lo pedido (de la lista de claves de abajo; [] si no se nombra ni se deduce ninguna; máximo 3). Solo las que de verdad hacen falta.
 Flujos:
 ${list}
+Claves de tech: ${SPEC_KEYS.map((k) => `${k} (${SPEC_DESC[k]})`).join(', ')}
 
 Petición del usuario:
 <<<
@@ -144,7 +148,7 @@ ${text}
 >>>`;
 }
 
-// Devuelve { kind, cmds } o null si la respuesta no es utilizable
+// Devuelve { kind, cmds, techs } o null si la respuesta no es utilizable
 export function parseRouter(out, allowed) {
   const m = /\{[\s\S]*?\}/.exec(String(out || ''));
   if (!m) return null;
@@ -153,7 +157,8 @@ export function parseRouter(out, allowed) {
   const kind = ['pregunta', 'pequeno', 'pequeño', 'tarea'].includes(j.kind) ? (j.kind === 'pequeño' ? 'pequeno' : j.kind) : null;
   if (!kind) return null;
   const cmds = (Array.isArray(j.flows) ? j.flows : []).filter((c) => typeof c === 'string' && allowed.includes(c));
-  return { kind, cmds: [...new Set(cmds)].sort((a, b) => rank(a) - rank(b)) };
+  const techs = [...new Set((Array.isArray(j.tech) ? j.tech : []).map((t) => String(t).toLowerCase()).filter((t) => SPEC_KEYS.includes(t)))].slice(0, 3);
+  return { kind, cmds: [...new Set(cmds)].sort((a, b) => rank(a) - rank(b)), techs };
 }
 
 // Sin Haiku (sin red, sin login…): palabras clave y una estimación del tipo de petición
@@ -163,7 +168,7 @@ export function localRoute(text) {
   const words = t.split(/\s+/).filter(Boolean).length;
   const question = /\?\s*$/.test(t) || /^[\s¿]*(que|como|por que|donde|cual|cuando|quien|cuanto)\b/.test(t);
   const kind = question ? 'pregunta' : words >= 6 || cmds.length ? 'tarea' : 'pequeno';
-  return { kind, cmds };
+  return { kind, cmds, techs: specialistsFor(text).slice(0, 3) };
 }
 
 // Para lo que no encaja con ningún flujo pero es un trabajo de verdad: el método completo, igualmente

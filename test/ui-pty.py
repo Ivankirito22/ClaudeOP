@@ -6,6 +6,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 W,H=150,42
 proj=tempfile.mkdtemp(prefix='projY-'); stf=tempfile.mktemp(suffix='.json'); hf=tempfile.mktemp(suffix='.jsonl')
 os.makedirs(os.path.join(proj,'docs')); open(os.path.join(proj,'README.md'),'w').write('# Mi Juego\nroguelike\n'); open(os.path.join(proj,'docs','guia.md'),'w').write('# Guia de niveles\n')
+json.dump({'settings': {'planPreview': False}, 'projects': {}}, open(stf, 'w'))  # el plan previo se prueba en smoke.mjs y web.py
 env=dict(os.environ, TERM='xterm-256color', CR_CLAUDE_BIN="node " + os.path.join(ROOT, "test", "fake-claude.mjs"), CR_STATE_FILE=stf, CR_HISTORY_FILE=hf, HOME=tempfile.mkdtemp(prefix='home-'), CR_NO_UPDATE_CHECK='1')
 pid,fd=pty.fork()
 if pid==0:
@@ -125,7 +126,7 @@ check('clic Rehacer lo recupera', os.path.exists(os.path.join(proj,'nuevo.txt'))
 
 # teclado vivo tras clics
 typ('/stack')
-check('tras varios clics se sigue pudiendo escribir', waitfor('Especialistas activados'))
+check('tras varios clics se sigue pudiendo escribir', waitfor('Especialistas del proyecto'))
 
 # cola
 typ('/cola primera tarea'); typ('/cola /limpiar')
@@ -158,7 +159,7 @@ saw=reveal('Ayuda')
 okc=clicktxt('Ayuda'); pump(0.8)
 w=waitfor('Atajos','menú'); check('rueda baja la barra y se puede hacer clic abajo (Ayuda)', saw and okc and w)
 typ('/estado')
-check('teclado vivo tras rueda+clic; /estado completo', waitfor('Subagentes (9)','Git:','Verificación:'))
+check('teclado vivo tras rueda+clic; /estado completo', waitfor('Subagentes base (9)','Git:','Verificación:'))
 
 # estado persistido
 st=json.load(open(stf))

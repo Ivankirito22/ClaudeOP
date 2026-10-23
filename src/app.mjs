@@ -2,13 +2,14 @@
 // La vista solo implementa `ui`: { log(texto), setInput(texto), focusInput(), changed(), quit(), shortcuts }.
 // Los textos usan etiquetas estilo blessed ({green-fg}, {bold}, {/}); cada vista las pinta a su manera.
 import { spawn as nodeSpawn } from 'node:child_process';
-import { Session, PROFILES, MODELS, TIERS, tierOf, authStatus, authLogout, claudeCmd, effectiveVerify, DEFAULT_ALLOW } from './core.mjs';
+import { Session, PROFILES, MODELS, TIERS, tierOf, authStatus, authLogout, claudeCmd, effectiveVerify, DEFAULT_ALLOW, isQuick } from './core.mjs';
 import { ACTIONS } from './actions.mjs';
 import { loadSettings, saveSettings, getProject, setProject, loadCustom } from './config.mjs';
 import { DriftTracker, installRules, hasRules, lessonsInfo, LESSONS_REL } from './rules.mjs';
 import * as gitx from './git.mjs';
 import * as history from './history.mjs';
-import { detectStack } from './stack.mjs';
+import { detectStack, SPECIALISTS, SPEC_KEYS, specialistsFor } from './stack.mjs';
+import { newPlan, planItems, togglePlan, resolvePlan, skipNote, planLines } from './plan.mjs';
 import { TaskQueue } from './queue.mjs';
 import { scanDocs, digestState, contextFiles, contextPrompt, readable, CONTEXT_REL } from './docs.mjs';
 import { currentVersion, checkUpdate, runUpdate } from './update.mjs';
@@ -56,6 +57,7 @@ export function createApp(cwd, ui) {
   let lastLabel = '';
   let thinking = false; // Haiku está leyendo tu petición para elegir flujos
   let warnedRouter = false;
+  let planState = null; // plan previo esperando que lo confirmes: { plan, text, general, label, ... }
   let tray = []; // acciones pulsadas que se enviarán juntas (más lo que escribas) al pulsar Enviar
   let pending = null; // acción a medias: { main, wrap, label, queue } — se aplica a lo que escribas a continuación
   let currentLabel = null; // etiqueta de la instrucción en curso (para historial)
@@ -80,15 +82,19 @@ export function createApp(cwd, ui) {
   }
 
   // ---------- Enviar instrucciones ----------
-  function send(prompt, { display, label, main, skipEcho } = {}) {
+  function send(prompt, { display, label, main, skipEcho, specialists } = {}) {
     if (session.busy) { log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}'); return false; }
+    planState = null;
+    // Especialistas: los que decidas/detecte el enrutador; si no, solo los 2 del proyecto y solo en trabajos de verdad
+    const specs = specialists ?? (isQuick(prompt) ? [] : stack.hints.slice(0, 2));
     lastLabel = '';
     active = null;
     currentLabel = label || null;
     if (!skipEcho) log(`\n{bold}› ${esc(display || label || prompt)}{/bold}`);
     const t = history.typicalCost(label);
     if (t) log(`{gray-fg}≈ $${t.cost.toFixed(2)} suele costar esto (media de ${t.n} veces){/}`);
-    session.run(prompt, { label, ...(main ? { main } : {}) }).catch((e) => log(`{red-fg}${esc(e.message)}{/}`));
+    if (specs.length) log(`{gray-fg}🧩 Especialistas para esta tarea: ${esc(specs.map((k) => SPECIALISTS[k].tag).join(', '))} (aparecen solo ahora){/}`);
+    session.run(prompt, { label, specialists: specs, ...(main ? { main } : {}) }).catch((e) => log(`{red-fg}${esc(e.message)}{/}`));
     return true;
   }
 
@@ -166,22 +172,97 @@ export function createApp(cwd, ui) {
     let auto = [];
     let general = false;
     let note = '';
+    let techs = [];
     if (!literal && settings.autoFlows !== false && text) {
       const allowed = actions.filter((a) => isStackable(a) && a.cmd !== '/bug');
       const r = await route(text, allowed);
       if (session.busy) return log('{yellow-fg}Mientras tanto empezó otra tarea; vuelve a enviarlo cuando termine.{/}');
       auto = r.cmds.map(findAction).filter((a) => a && !chosen.includes(a));
+      techs = r.kind === 'tarea' || chosen.length ? r.techs || [] : [];
       const who = r.how === 'haiku' ? 'Haiku leyó tu petición' : 'Reconozco lo que pides';
       if (auto.length) note = `${who} y usa ${auto.map((a) => a.label).join(' + ')} (ya existe como flujo).`;
       else if (!chosen.length && r.kind === 'tarea') { general = true; note = `${who}: no encaja con un flujo concreto, pero es un trabajo de verdad → método general (explorar → planificar → hacer → comprobar → optimizar → verificar, con subagentes).`; }
       else if (!chosen.length && r.kind === 'pequeno') note = `${who}: cambio pequeño, lo hago directo (delegando solo si hace falta).`;
     }
+    if (!techs.length && !literal && text && (settings.autoFlows === false || !text)) techs = specialistsFor(text);
     let all = general ? [GENERAL] : [...chosen, ...auto];
     if (all.length > MAX_FLOWS) all = all.slice(0, MAX_FLOWS);
     all.sort((a, b) => rank(a.cmd) - rank(b.cmd));
+
+    // Especialistas: los que nombra tu frase (Haiku, o palabras clave) y, si es un trabajo y no dices nada, los del proyecto
+    let specs = literal ? [] : techs.slice(0, 3);
+    if (!literal && !specs.length && all.length) specs = stack.hints.slice(0, 2);
+
+    if (!literal && all.length && settings.planPreview !== false) {
+      showPlan({ plan: newPlan({ flows: all, specs, text }), text, note });
+      return;
+    }
+    launch(all, text, specs, note, literal);
+  }
+
+  function launch(all, text, specs, note, literal, extra = '') {
     const label = all.length ? all.map((a) => a.label).join(' + ') : undefined;
-    const ok = send(composePrompt(all, text), { label, skipEcho: true });
-    if (ok && note) log(`{gray-fg}↪ ${esc(note)} Para que vaya literal, empieza con «!».{/}`);
+    const ok = send(composePrompt(all, text) + extra, { label, skipEcho: true, specialists: specs });
+    if (ok && note) log(`{gray-fg}↪ ${esc(note)}${literal ? '' : ' Para que vaya literal, empieza con «!».'}{/}`);
+    refresh();
+  }
+
+  // ---------- Plan previo con checks ----------
+  function printPlan() {
+    const { text } = planLines(planState.plan);
+    log(`\n{bold}Plan{/bold} {gray-fg}(todo marcado; desmarca lo que no quieras)${planState.note ? ' — ' + esc(planState.note) : ''}{/}\n${text}\n{gray-fg}Escribe los números para marcar/desmarcar (ej. «3 5») · Enter ejecuta · «x» cancela${ui.planHint ? ' · ' + ui.planHint : ''}{/}`);
+  }
+  function showPlan(st) {
+    planState = st;
+    if (ui.planInLog !== false) printPlan();
+    refresh();
+    focusInput();
+  }
+  function planToggleId(id) {
+    if (!planState) return false;
+    const ok = togglePlan(planState.plan, id);
+    if (ok) refresh();
+    return ok;
+  }
+  function planRun() {
+    if (!planState) return;
+    if (session.busy) return log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}');
+    const { plan, text, note } = planState;
+    const r = resolvePlan(plan);
+    planState = null;
+    if (!r.flows.length && !text) { log('{gray-fg}Plan vacío: no queda nada marcado. Cancelado.{/}'); return refresh(); }
+    const off = r.skipped.length ? `${r.skipped.length} paso(s) desmarcado(s)` : '';
+    log(`{gray-fg}✔ Plan confirmado: ${esc(r.flows.map((f) => f.label).join(' + ') || 'tu texto')}${r.skipped.length ? ' · sin: ' + esc(r.skipped.map((x) => x.label).join(', ')) : ''}${r.specs.length ? ' · con: ' + esc(r.specs.map((k) => SPECIALISTS[k].tag).join(', ')) : ''}{/}`);
+    launch(r.flows, text, r.specs, [note, off].filter(Boolean).join(' · '), true, skipNote(r.skipped));
+  }
+  function planCancel() {
+    if (!planState) return;
+    planState = null;
+    log('{gray-fg}Plan cancelado: no se ha hecho nada.{/}');
+    refresh();
+    focusInput();
+  }
+  // Tecleado: números marcan/desmarcan, Enter ejecuta, x cancela
+  function planInput(text) {
+    const t = text.trim().toLowerCase();
+    if (!t || ['ok', 'si', 'sí', 'ejecutar', 'dale', 'vale', 'go'].includes(t)) return planRun();
+    if (['x', 'no', 'cancelar', 'cancela', '/cancelar'].includes(t)) return planCancel();
+    if (/^[\d\s,]+$/.test(t)) {
+      const items = planItems(planState.plan);
+      for (const n of t.split(/[\s,]+/).filter(Boolean).map(Number)) if (items[n - 1]) togglePlan(planState.plan, items[n - 1].id);
+      printPlan();
+      return refresh();
+    }
+    return log('{yellow-fg}Hay un plan esperando: números para marcar/desmarcar, Enter para ejecutar, «x» para cancelar.{/}');
+  }
+
+  function togglePlanPreview(arg) {
+    const a = String(arg || '').trim().toLowerCase();
+    settings.planPreview = ['on', 'si', 'sí'].includes(a) ? true : ['off', 'no'].includes(a) ? false : settings.planPreview === false;
+    log(settings.planPreview
+      ? '{green-fg}Plan previo: sí.{/} Antes de ejecutar te enseño la lista de pasos con checks (todo marcado); desmarcas lo que no quieras.'
+      : '{bold}Plan previo: no.{/} Se ejecuta directamente lo que pidas.');
+    persist();
     refresh();
   }
 
@@ -565,13 +646,16 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
   Auto-compactar: ${settings.autoCompact ? 'sí' : 'no'} (a partir de ${kfmt(settings.compactAt)} tokens)   presupuesto: ${settings.maxBudget ? '$' + settings.maxBudget : 'sin límite'}
   Verificación: ${settings.verify} (efectiva: ${effectiveVerify(settings.verify, session.profile)})   recordatorio de reglas cada ${settings.remindEvery || '—'} instrucciones
   Git: ${repo ? `{green-fg}sí{/}, ${ckptCount} fotos guardadas (/deshacer)` : '{yellow-fg}no es repositorio: sin red de seguridad (/git-init){/}'}   push bloqueado: ${settings.blockPush !== false ? 'sí' : 'no'}
-  Subagentes (${Object.keys(session.agents).length}): ${agents}
+  Subagentes base (${Object.keys(session.agents).length}): ${agents}   plan previo: ${settings.planPreview !== false ? 'sí' : 'no'}
   ${process.env.ANTHROPIC_API_KEY ? '{yellow-fg}ANTHROPIC_API_KEY definida: puede usarse la API de pago.{/}' : '{gray-fg}Sin ANTHROPIC_API_KEY: se usa tu suscripción.{/}'}`);
   }
 
   function showStack() {
-    const spec = Object.keys(stack.agents);
-    log(`\n{bold}Stack{/bold}: ${stack.summary || 'no reconozco nada concreto (genérico)'}\n  Especialistas activados: ${spec.length ? spec.join(', ') : 'ninguno'} {gray-fg}(solo se cargan los que encajan: cada subagente listado cuesta tokens){/}\n  Subagentes base: explorador, limpiador, probador, documentador, investigador, revisor, depurador, verificador, arquitecto\n  Propios: ${Object.keys(custom.agents).join(', ') || '—'} {gray-fg}(.claude-router.json){/}`);
+    log(`\n{bold}Stack{/bold}: ${stack.summary || 'no reconozco nada concreto (genérico)'}\n  Especialistas del proyecto (los que aparecen si no dices otra cosa): ${stack.hints.length ? stack.hints.join(', ') : 'ninguno'}\n  Subagentes base: explorador, limpiador, probador, documentador, investigador, revisor, depurador, verificador, arquitecto\n  Propios: ${Object.keys(custom.agents).join(', ') || '—'} {gray-fg}(.claude-router.json){/}\n  {gray-fg}/especialistas lista los que existen. Solo se cargan cuando la tarea toca su tecnología: cada subagente listado cuesta tokens.{/}`);
+  }
+
+  function showSpecialists() {
+    log(`\n{bold}Especialistas bajo demanda{/bold} {gray-fg}(no están siempre activos: aparecen solo cuando la tarea toca su tecnología){/}\n${SPEC_KEYS.map((k) => `  ${esc(SPECIALISTS[k].tag.padEnd(12))} {gray-fg}${esc(SPECIALISTS[k].description.replace(/ \(mid-tier\)\./, ' —').slice(0, 110))}{/}`).join('\n')}\n  {gray-fg}Detectados en este proyecto: ${stack.hints.length ? stack.hints.map((k) => SPECIALISTS[k].tag).join(', ') : 'ninguno'}{/}`);
   }
 
   function help() {
@@ -582,6 +666,7 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
     {cyan-fg}● Sonnet{/}  implementar, coordinar, depurar, revisar y verificar
     {magenta-fg}● Opus{/}    decisiones difíciles (arquitectura, bugs rebeldes)
   Los FLUJOS encadenan agentes (explorar → diseñar → implementar → probar+revisar → verificar), con los pasos independientes en paralelo.
+  Antes de ejecutar te enseño el PLAN con checks (todo marcado): desmarcas lo que no quieras y Enter lo ejecuta (/plan on|off). Los ESPECIALISTAS (Python, C++, C#, Java, Node, HTML/CSS, SQL, Blender…) solo aparecen cuando la tarea toca su tecnología (/especialistas).
 
 {bold}Seguridad{/bold}
   Antes de cada instrucción se guarda una foto de la carpeta (si hay git): /cambios ver · /deshacer · /rehacer.
@@ -598,7 +683,7 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
 {bold}Comandos{/bold}
   ${actions.map((a) => a.cmd).join('  ')}
   /cambios /deshacer /rehacer /git-init /informe [días] /lecciones /docs /contexto /stack /verificar /permitir X /permitidos /push /recordatorio N
-  /reglas /recordar /compactar /auto-compactar /continuar /nombre X /presupuesto N|off /autoflujos /actualizar
+  /reglas /recordar /compactar /auto-compactar /continuar /nombre X /presupuesto N|off /autoflujos /plan /especialistas /actualizar
   /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir
 ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   }
@@ -635,6 +720,8 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     '/permitidos': showAllow,
     '/push': setPush,
     '/autoflujos': toggleAutoFlows,
+    '/plan': togglePlanPreview,
+    '/especialistas': showSpecialists,
     '/cambios': showChanges,
     '/deshacer': doUndo,
     '/rehacer': doRedo,
@@ -655,6 +742,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
 
   function handleInner(raw) {
     const text = (raw || '').trim();
+    if (planState && (!text.startsWith('/') || text === '/cancelar')) return planInput(text);
     if (!text && !tray.length) return;
     if (text.startsWith('/')) {
       const [cmd, ...rest] = text.split(/\s+/);
@@ -750,6 +838,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
         { id: 'profile', label: `Perfil: ${prof().label}`, desc: prof().desc, run: cycleProfile },
         { id: 'perm', label: `Permisos: ${session.permission}`, run: cyclePerm },
         { id: 'autoflows', label: `Reconocer flujos: ${settings.autoFlows !== false ? 'sí' : 'no'}`, desc: 'Si escribes con tus palabras, usa los flujos que ya existen', run: () => toggleAutoFlows('') },
+        { id: 'planprev', label: `Plan previo: ${settings.planPreview !== false ? 'sí' : 'no'}`, desc: 'Lista con checks antes de ejecutar', run: () => togglePlanPreview('') },
         { id: 'verify', label: `Verificación: ${settings.verify}`, run: () => setVerify('') },
         { id: 'login', label: 'Login / estado', run: doLogin },
         { id: 'status', label: 'Ver estado completo', run: status },
@@ -809,6 +898,8 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       queueLen: queue.items.length,
       tray: trayActions().map((a) => ({ id: a.cmd, label: a.label, needsText: needsText(a) })),
       autoFlows: settings.autoFlows !== false,
+      planPreview: settings.planPreview !== false,
+      plan: planState ? { note: planState.note || '', text: planState.text || '', items: planItems(planState.plan) } : null,
       tiers: TIERS.map((t) => ({ tier: t, msgs: st.tiers[t].msgs, inp: st.tiers[t].inp, out: st.tiers[t].out, share: st.tiers[t].out / total })),
       cost: st.cost,
       cacheRatio: st.cacheRatio,
@@ -938,7 +1029,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       if (session.version.text) log(`{gray-fg}Claude Code ${session.version.text}{/}`);
       if (!session.supports([2, 1, 281])) log('{yellow-fg}Tu Claude Code es antiguo para --agents con fichero: ejecuta `claude update`.{/}');
     }
-    if (stack.summary) log(`{gray-fg}Stack detectado: ${esc(stack.summary)}${Object.keys(stack.agents).length ? ' → especialistas activados: ' + Object.keys(stack.agents).join(', ') : ''}{/}`);
+    if (stack.summary) log(`{gray-fg}Stack detectado: ${esc(stack.summary)} → los especialistas (/especialistas) aparecen solos cuando la tarea toca su tecnología.{/}`);
     if (process.env.ANTHROPIC_API_KEY) {
       log('{yellow-fg}Ojo: tienes ANTHROPIC_API_KEY definida; Claude Code puede usar la API (de pago) en vez de tu suscripción. Bórrala si quieres usar solo el login.{/}');
     }
@@ -973,7 +1064,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   }
 
   return {
-    handle, menu, press, snapshot, boot, cancelPending, setCollapsed, quit, removeFromTray, clearTray,
+    handle, menu, press, snapshot, boot, planToggle: planToggleId, planRun, planCancel, cancelPending, setCollapsed, quit, removeFromTray, clearTray,
     cancel: () => SYSTEM['/cancelar'](),
     cwd, session, settings,
     get queueRunning() { return queueRunning; },

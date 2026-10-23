@@ -18,8 +18,15 @@ function run() {
     const flows = [];
     if (/optimi[zs]/.test(req)) flows.push('/optimizar');
     if (/\b(crea|creame|modela|modelo)\b/.test(req)) flows.push('/feature');
+    const tech = [];
+    if (/pyth[oó]n|\.py\b|pytest/.test(req)) tech.push('python');
+    if (/c\+\+|\bcpp\b/.test(req)) tech.push('cpp');
+    if (/c#|unity/.test(req)) tech.push('csharp');
+    if (/\bcss\b|html/.test(req)) tech.push('web');
+    if (/blender|bpy/.test(req)) tech.push('blender');
+    if (/node/.test(req)) tech.push('node');
     const kind = /\?/.test(req) ? 'pregunta' : /color|rojo/.test(req) ? 'pequeno' : 'tarea';
-    const txt = JSON.stringify({ kind, flows });
+    const txt = JSON.stringify({ kind, flows, tech });
     out({ type: 'assistant', message: { id: 'r1', model: 'claude-haiku-5-5', content: [{ type: 'text', text: txt }], usage: { input_tokens: 300, output_tokens: 20 } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: txt, total_cost_usd: 0.0005, num_turns: 1, duration_ms: 300 });
     return;

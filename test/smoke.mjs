@@ -260,8 +260,8 @@ assert.equal(r1.cost, 0.0123);
   assert.equal(effectiveVerify('auto', 'eco'), 'nunca');
   assert.equal(effectiveVerify('nunca', 'quality'), 'nunca');
   const withSpec = buildPolicy('balanced', 'Frivan', buildAgents({ frontend: { description: 'fe', prompt: 'p', model: 'sonnet' } }));
-  assert.ok(withSpec.includes('delegate to that specialist'));
-  assert.ok(!pol.includes('delegate to that specialist'), 'sin especialistas no se menciona');
+  assert.ok(withSpec.includes('Specialists loaded ONLY for this request'));
+  assert.ok(!pol.includes('Specialists loaded ONLY'), 'sin especialistas no se menciona');
   assert.ok(augmentPrompt('rediseña la arquitectura del login', {}).notes.includes('plan con arquitecto'));
   assert.ok(!augmentPrompt('arregla el color del botón', {}).notes.includes('plan con arquitecto'));
 }
@@ -274,17 +274,64 @@ assert.equal(r1.cost, 0.0123);
     return d;
   };
   const a = detectStack(mk({ 'package.json': JSON.stringify({ dependencies: { react: '^18', express: '^4' }, devDependencies: { typescript: '^5' } }) }));
-  assert.deepEqual(a.tags.sort(), ['backend', 'frontend', 'ts']);
-  assert.deepEqual(Object.keys(a.agents).sort(), ['backend', 'frontend']);
+  assert.deepEqual(a.tags.sort(), ['backend', 'frontend', 'node', 'ts']);
+  assert.deepEqual(a.hints.sort(), ['backend', 'frontend', 'node']);
+  assert.deepEqual(a.agents, {}, 'los especialistas ya no van siempre activos');
   assert.ok(a.summary.includes('Frontend') && a.summary.includes('TypeScript'));
   assert.ok(detectStack(mk({ 'tools/export.py': 'import bpy\nprint(1)\n' })).tags.includes('blender'));
   assert.ok(detectStack(mk({ 'scene.blend': 'x' })).tags.includes('blender'));
   assert.ok(detectStack(mk({ 'pom.xml': '<project/>' })).tags.includes('java'));
   assert.ok(detectStack(mk({ 'project.godot': 'x' })).tags.includes('juego'));
   const none = detectStack(mk({ 'README.md': 'hola' }));
-  assert.deepEqual(none.agents, {});
+  assert.deepEqual(none.hints, []);
+  // por extensión: lenguajes sin archivo de proyecto
+  assert.ok(detectStack(mk({ 'a.py': 'x=1', 'b.py': 'y=2' })).hints.includes('python'));
+  assert.ok(detectStack(mk({ 'src/a.cpp': 'int main(){}', 'src/b.hpp': '' })).hints.includes('cpp'));
+  assert.ok(detectStack(mk({ 'Assets/A.cs': 'class A{}', 'Assets/B.cs': 'class B{}' })).hints.includes('csharp'));
+  assert.ok(detectStack(mk({ 'index.html': '<p/>', 'style.css': 'a{}', 'x.css': 'b{}' })).hints.includes('web'));
+  // sesión: sin especialistas por defecto; solo aparecen los que se piden en ESA instrucción
   const ss = new Session({ cwd: process.cwd(), settings: { userName: 'Frivan', checkpoints: false }, stack: a });
-  assert.ok('frontend' in ss.agents && 'backend' in ss.agents && !('blender' in ss.agents));
+  assert.ok(!('frontend' in ss.agents) && !('python' in ss.agents), 'sin especialistas hasta que se llaman');
+  ss.activeSpecialists = ['python', 'cpp'];
+  assert.ok('python' in ss.agents && 'cpp' in ss.agents && !('blender' in ss.agents));
+  assert.ok(ss.agents.python.prompt && !('kw' in ss.agents.python) && !('tag' in ss.agents.python));
+}
+
+// 11g2) especialistas bajo demanda: catálogo, detección por texto, plan con checks
+{
+  const { SPECIALISTS, SPEC_KEYS, specialistsFor } = await import('../src/stack.mjs');
+  for (const k of ['python', 'cpp', 'csharp', 'java', 'node', 'web', 'frontend', 'backend', 'sql', 'blender', 'juego', 'go', 'rust', 'php', 'mobile', 'shell']) assert.ok(SPECIALISTS[k], 'falta especialista ' + k);
+  assert.ok(SPEC_KEYS.length >= 15);
+  const t = (txt) => specialistsFor(txt);
+  assert.ok(t('arréglame este script de Python').includes('python'));
+  assert.ok(t('crea una clase en C++ con CMake').includes('cpp'));
+  assert.ok(t('un script en C# para Unity').includes('csharp'));
+  assert.ok(t('mejora el CSS del header').includes('web'));
+  assert.ok(t('endpoint en Express con node').includes('node'));
+  assert.ok(t('modela un barril en Blender con bpy').includes('blender'));
+  assert.ok(t('una consulta SQL en postgres').includes('sql'));
+  assert.ok(!t('optimiza javascript').includes('java'), 'javascript no es java');
+  assert.deepEqual(t('hola qué tal'), []);
+
+  const { newPlan, planItems, togglePlan, resolvePlan, skipNote, visibleSteps } = await import('../src/plan.mjs');
+  const fa = [{ cmd: '/feature', label: 'Feature completa' }, { cmd: '/optimizar', label: 'Optimizar proyecto' }];
+  const plan = newPlan({ flows: fa, specs: ['python', 'inventado'], text: 'x' });
+  let it = planItems(plan);
+  assert.ok(it.every((i) => i.on), 'todo marcado al principio');
+  assert.deepEqual(it.filter((i) => i.kind === 'spec').map((i) => i.id), ['spec:python']);
+  assert.ok(it.some((i) => i.id === 'step:planificar') && it.some((i) => i.id === 'step:mecanico'));
+  assert.ok(togglePlan(plan, 'step:planificar') && togglePlan(plan, 'spec:python') && !togglePlan(plan, 'step:noexiste'));
+  let r = resolvePlan(plan);
+  assert.deepEqual(r.flows.map((f) => f.cmd), ['/feature', '/optimizar']);
+  assert.deepEqual(r.specs, []);
+  assert.deepEqual(r.skipped.map((x) => x.id), ['planificar']);
+  assert.ok(skipNote(r.skipped).includes('NO los hagas') && skipNote(r.skipped).includes('arquitecto'));
+  assert.equal(skipNote([]), '');
+  // desmarcar un flujo entero quita sus pasos propios (los compartidos se quedan)
+  togglePlan(plan, 'flow:/feature');
+  const ids = visibleSteps(plan).map((x) => x.id);
+  assert.ok(!ids.includes('implementar') && !ids.includes('documentar') && ids.includes('mecanico') && ids.includes('probar'));
+  assert.deepEqual(resolvePlan(plan).flows.map((f) => f.cmd), ['/optimizar']);
 }
 
 // 11h) git: foto antes de cada instrucción, ver cambios, deshacer/rehacer varias veces
@@ -613,15 +660,17 @@ assert.equal(r1.cost, 0.0123);
 // 13c) enrutador: Haiku (falso) elige flujos, método general, cambio pequeño, y si Haiku falla → palabras clave
 {
   const it = await import('../src/intent.mjs');
-  assert.deepEqual(it.parseRouter('ruido {"kind":"tarea","flows":["/optimizar","/nada"]} fin', ['/optimizar', '/feature']), { kind: 'tarea', cmds: ['/optimizar'] });
+  assert.deepEqual(it.parseRouter('ruido {"kind":"tarea","flows":["/optimizar","/nada"]} fin', ['/optimizar', '/feature']), { kind: 'tarea', cmds: ['/optimizar'], techs: [] });
+  assert.deepEqual(it.parseRouter('{"kind":"tarea","flows":[],"tech":["Python","cpp","inventado","rust","go","php"]}', []).techs, ['python', 'cpp', 'rust'], 'tech: solo claves válidas, máx. 3');
   assert.equal(it.parseRouter('no es json', ['/optimizar']), null);
   assert.equal(it.parseRouter('{"kind":"otra"}', ['/optimizar']), null);
   const { createApp } = await import('../src/app.mjs');
   const dir = fs.mkdtempSync(path.join(tmpHome, 'route-'));
   process.env.FAKE_ECHO = '1';
-  const drive = async (text) => {
+  const drive = async (text, { plan = false } = {}) => {
     const logs = [];
     const app = createApp(dir, { log: (t) => logs.push(String(t)), setInput() {}, focusInput() {}, changed() {}, quit() {}, shortcuts: '' });
+    if (!plan) app.handle('/plan off');
     app.handle(text);
     for (let i = 0; i < 100 && !logs.some((l) => l.includes('terminado')); i++) await new Promise((r) => setTimeout(r, 100));
     app.dispose();
@@ -639,6 +688,74 @@ assert.equal(r1.cost, 0.0123);
   o = await drive('optimiza el código del enemigo');
   assert.ok(o.includes('No pude consultar a Haiku') && o.includes('Reconozco lo que pides') && o.includes('Optimizar proyecto'), 'sin Haiku: palabras clave');
   delete process.env.FAKE_ROUTER_FAIL;
+
+  // Especialistas bajo demanda: Haiku dice qué tecnologías toca la frase y SOLO esas se cargan en la instrucción
+  o = await drive('créame un script en python y optimízalo');
+  assert.ok(o.includes('Especialistas para esta tarea: Python'), 'aparece el de Python');
+  assert.ok(o.includes('--agents'), 'el fake devuelve los args');
+  o = await drive('mejora el css y el html del menú de la web con pantalla nueva');
+  assert.ok(o.includes('Especialistas para esta tarea: HTML/CSS'));
+  assert.ok(!o.includes('Python'), 'los demás no aparecen');
+
+  // Plan previo con checks: aparece, se desmarca, se ejecuta solo lo marcado
+  const mk = () => {
+    const logs = [];
+    const app = createApp(dir, { log: (t) => logs.push(String(t)), setInput() {}, focusInput() {}, changed() {}, quit() {}, shortcuts: '' });
+    return { logs, app, all: () => logs.join('\n') };
+  };
+  const until = async (fn) => { for (let i = 0; i < 120 && !fn(); i++) await new Promise((r) => setTimeout(r, 100)); };
+  {
+    const { logs, app, all } = mk();
+    app.handle('/plan on');
+    app.handle('créame un script en python y optimízalo');
+    await until(() => app.snapshot().plan);
+    let sn = app.snapshot();
+    assert.ok(sn.plan && sn.plan.items.every((i) => i.on), 'plan con todo marcado');
+    assert.ok(sn.plan.items.some((i) => i.id === 'flow:/feature') && sn.plan.items.some((i) => i.id === 'spec:python') && sn.plan.items.some((i) => i.id === 'step:planificar'));
+    assert.ok(all().includes('Plan') && all().includes('☑'), 'también se pinta en la terminal');
+    assert.ok(!logs.some((l) => l.includes('MÉTODO') || l.includes('### Flujo')), 'todavía no se ha enviado nada a Claude');
+    // la terminal: números desmarcan, Enter ejecuta
+    const idx = sn.plan.items.findIndex((i) => i.id === 'step:planificar') + 1;
+    app.handle(String(idx));
+    assert.equal(app.snapshot().plan.items.find((i) => i.id === 'step:planificar').on, false);
+    assert.ok(app.planToggle('spec:python') && app.snapshot().plan.items.find((i) => i.id === 'spec:python').on === false);
+    assert.ok(app.planToggle('spec:python'));
+    process.env.FAKE_ECHO = '1';
+    app.handle('');
+    await until(() => all().includes('terminado'));
+    const out = all();
+    assert.ok(out.includes('Plan confirmado') && out.includes('sin: Plan / decisiones difíciles'), 'resumen del plan');
+    assert.ok(out.includes('AJUSTES DEL USUARIO SOBRE EL PLAN') && out.includes('NO los hagas') && out.includes('arquitecto'), 'lo desmarcado llega a Claude');
+    assert.ok(out.includes('### Flujo 1: Feature completa') && out.includes('### Flujo 2: Optimizar proyecto'));
+    assert.ok(out.includes('Especialistas para esta tarea: Python'));
+    assert.equal(app.snapshot().plan, null, 'el plan se cierra al ejecutar');
+    app.dispose();
+  }
+  {
+    const { app, all } = mk();
+    app.handle('/plan on');
+    app.handle('créame un script en python');
+    await until(() => app.snapshot().plan);
+    app.handle('x');
+    assert.equal(app.snapshot().plan, null);
+    assert.ok(all().includes('Plan cancelado') && !all().includes('terminado'), 'cancelar no ejecuta nada');
+    // preguntas y cambios pequeños no piden plan
+    const before = all().length;
+    app.handle('¿qué hace este módulo de python?');
+    await until(() => all().includes('terminado'));
+    assert.ok(!all().slice(before).includes('☑') && app.snapshot().plan === null, 'sin plan para preguntas');
+    app.dispose();
+  }
+  {
+    const { app, all } = mk();
+    app.handle('/plan off');
+    app.handle('créame un script en python');
+    await until(() => all().includes('terminado'));
+    assert.equal(app.snapshot().plan, null);
+    assert.ok(app.snapshot().planPreview === false);
+    app.handle('/plan on');
+    app.dispose();
+  }
   delete process.env.FAKE_ECHO;
 }
 

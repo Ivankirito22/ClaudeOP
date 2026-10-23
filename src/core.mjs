@@ -2,6 +2,7 @@
 // El modelo principal orquesta y delega en subagentes con otro modelo (Haiku / Sonnet / Opus)
 // DENTRO del mismo prompt. Todo va por Claude Code (`claude -p`): usa tu login, sin API key.
 import { FLOW_CATALOG } from './intent.mjs';
+import { SPECIALISTS, specialistDefs } from './stack.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -189,7 +190,7 @@ export function buildPolicy(profile, userName = 'tú', agents = buildAgents(), o
   const list = Object.entries(agents)
     .map(([n, a]) => `- ${n} (${tierOf(a.model)}): ${a.description}`)
     .join('\n');
-  const specialists = Object.keys(agents).filter((n) => ['frontend', 'backend', 'blender', 'juego', 'java'].includes(n));
+  const specialists = Object.keys(agents).filter((n) => SPECIALISTS[n]);
   return `You are the orchestrator of a cost-aware multi-model workflow. Inside the SAME user request you hand sub-steps to subagents that run on other models (Agent tool, subagent_type). Always pick the cheapest model that can do each sub-step well.
 ${stack ? `Project stack: ${stack}.\n` : ''}
 Available subagents:
@@ -202,7 +203,7 @@ Routing rules (MUST follow; doing a cheap-tier job yourself wastes the user's mo
 - Docs/comments/README: documentador. Web lookups: investigador.
 - Non-obvious bug: depurador finds the root cause BEFORE you patch. Reviewing a diff or risky change: revisor.
 - Hard decisions (architecture, tricky bugs, complex algorithms/performance, risky refactors): arquitecto. Ask for a concrete plan, then implement it yourself or hand the mechanical parts to limpiador. If the user says something already failed, consult arquitecto before retrying.
-${specialists.length ? `- Implementation of more than ~20 lines inside a specialty covered by ${specialists.join('/')}: delegate to that specialist with complete instructions, then review its result yourself.\n` : ''}- You (the main model) do the normal implementation work and the final integration.
+${specialists.length ? `- Specialists loaded ONLY for this request because it touches their technology (${specialists.join(', ')}): hand them the implementation of more than ~20 lines in their language/tool, in parallel with each other when they work on different files, with complete instructions; then review their result yourself. They are not otherwise available.\n` : ''}- You (the main model) do the normal implementation work and the final integration.
 ${p.rules}
 
 Parallelism: when sub-steps are independent (e.g. probador + revisor, several explorador queries, several investigador lookups), issue ALL their Agent calls in ONE message so they run at the same time. Never run in parallel agents that edit the same files.
@@ -270,7 +271,8 @@ export class Session extends EventEmitter {
     const defaults = { userName: 'tú', compactAt: 150000, maxBudget: null, remindEvery: 5, verify: 'auto', lessons: true, checkpoints: true, blockPush: true, allow: [], contextDocs: true };
     for (const [k, v] of Object.entries(defaults)) if (settings[k] === undefined) settings[k] = v;
     this.settings = settings;
-    this.stack = stack || { tags: [], agents: {}, summary: '' }; // subagentes especialistas según el tipo de proyecto
+    this.stack = stack || { tags: [], hints: [], agents: {}, summary: '' };
+    this.activeSpecialists = []; // especialistas cargados para la instrucción en curso
     this.extraAllow = []; // permisos añadidos con /permitir (por proyecto)
     this.sinceRemind = 0;
     this.runStats = null;
@@ -292,7 +294,8 @@ export class Session extends EventEmitter {
     this.resetStats();
   }
 
-  get agents() { return buildAgents({ ...this.stack.agents, ...this.customAgents }); }
+  // Los especialistas solo existen durante la instrucción que toca su tecnología (cada subagente listado cuesta tokens)
+  get agents() { return buildAgents({ ...specialistDefs(this.activeSpecialists), ...this.customAgents }); }
   get allowList() { return [...new Set([...DEFAULT_ALLOW, ...(this.settings.allow || []), ...this.extraAllow])]; }
   get totalCost() { return this.costBase + this.sessionCost; }
 
@@ -535,6 +538,7 @@ export class Session extends EventEmitter {
     this._begin();
     try {
       const prof = PROFILES[this.profile] || PROFILES.balanced;
+      this.activeSpecialists = (opts.specialists || []).filter((k) => SPECIALISTS[k]).slice(0, 4);
       let main = opts.main || prof.main;
       let why = opts.main ? 'elegido por ti' : null;
       if (!opts.main && this.profile === 'eco' && isQuick(prompt)) { main = 'haiku'; why = 'pregunta rápida'; }

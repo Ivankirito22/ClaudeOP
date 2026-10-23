@@ -114,6 +114,7 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
     },
     setInput(text) { broadcast('input', { text: text || '' }); },
     focusInput() {},
+    planInLog: false, // el plan se ve como tarjeta con checks
     changed() {
       if (stateTimer) return;
       stateTimer = setTimeout(() => { stateTimer = null; broadcast('state', fullState()); }, 80);
@@ -220,6 +221,9 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
           case '/api/cancel-pending': app.cancelPending(); return ok();
           case '/api/tray-remove': app.removeFromTray(String(body.id || '')); return ok();
           case '/api/tray-clear': app.clearTray(); return ok();
+          case '/api/plan-toggle': return ok({ found: app.planToggle(String(body.id || '').slice(0, 80)) });
+          case '/api/plan-run': app.planRun(); return ok();
+          case '/api/plan-cancel': app.planCancel(); return ok();
           default: return deny(res, 404, 'no existe');
         }
       }
