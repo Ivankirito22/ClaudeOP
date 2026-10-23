@@ -7,9 +7,18 @@ export const MARK_START = '<!-- claude-router:start -->';
 export const MARK_END = '<!-- claude-router:end -->';
 
 export const LESSONS_REL = path.join('.claude', 'lecciones.md');
+import { contextRel as contextRelOf } from './docs.mjs';
 const LESSONS_HEADER = '# Lecciones del proyecto\n<!-- Una línea por lección (máx. 120 caracteres). Las añade Claude al arreglar bugs; claude-router las condensa. -->\n';
 
-export function rulesBlock(name, { lessons = true, context = true } = {}) {
+// Nunca pisamos un archivo tuyo: si ya existe .claude/lecciones.md y NO lo creó claude-router, usamos lecciones-router.md
+export function lessonsRel(cwd) {
+  const mine = (f) => { try { const t = fs.readFileSync(path.join(cwd, f), 'utf8'); return t.startsWith('# Lecciones del proyecto') && t.includes('claude-router'); } catch (e) { return e.code === 'ENOENT'; } };
+  return mine(LESSONS_REL) ? LESSONS_REL : path.join('.claude', 'lecciones-router.md');
+}
+
+export function rulesBlock(name, { lessons = true, context = true, lessonsFile = LESSONS_REL, contextFile = path.join('.claude', 'contexto.md') } = {}) {
+  const LR = lessonsFile.replace(/\\/g, '/');
+  const CR = contextFile.replace(/\\/g, '/');
   return `${MARK_START}
 ## Reglas de ${name} (gestionado por claude-router; no edites este bloque)
 
@@ -22,11 +31,12 @@ export function rulesBlock(name, { lessons = true, context = true } = {}) {
    - Agrupa llamadas independientes y para de explorar cuando ya tengas lo necesario.
 4. Delegación: lo mecánico (borrar código muerto, renombrar, formatear) y la exploración amplia van a subagentes baratos (limpiador, explorador, probador, documentador). Bugs raros: depurador antes de parchear. Solo decisiones difíciles van a arquitecto. Lanza en paralelo (un solo mensaje) los subagentes independientes.
 5. Calidad: antes de empezar una tarea no trivial di en una línea qué significa "hecho" y compruébalo al terminar; si tocas más de 2 archivos, que lo revise \`verificador\`. Al limpiar o optimizar no cambies el comportamiento: comprueba con grep que nada usa lo que borras.
-${lessons ? `6. Lecciones: al arreglar un bug o descubrir una trampa del proyecto, añade UNA línea (máx. 120 caracteres, sin duplicar) a \`${LESSONS_REL.replace(/\\/g, '/')}\`.
-@${LESSONS_REL.replace(/\\/g, '/')}
-` : ''}${context ? `${lessons ? '7' : '6'}. Documentación: al empezar, el resumen del proyecto está en \`.claude/contexto.md\` (importado abajo); para el detalle lee solo el MD que toque. Si tu cambio deja desactualizado un MD (comandos, estructura, API), actualízalo en la misma tarea.
-@.claude/contexto.md
-` : ''}${MARK_END}`;
+${lessons ? `6. Lecciones: al arreglar un bug o descubrir una trampa del proyecto, añade UNA línea (máx. 120 caracteres, sin duplicar) a \`${LR}\`.
+@${LR}
+` : ''}${context ? `${lessons ? '7' : '6'}. Documentación: al empezar, el resumen del proyecto está en \`${CR}\` (importado abajo); para el detalle lee solo el MD que toque. Si tu cambio deja desactualizado un MD (comandos, estructura, API), actualízalo en la misma tarea.
+@${CR}
+` : ''}${(lessons ? 1 : 0) + (context ? 1 : 0) + 6}. Archivos existentes: NUNCA sobrescribas ni borres un archivo que ya existe (MD, configuración, datos) sin que te lo pida; si ya hay uno con el mismo nombre, añade a él lo nuevo o crea otro con otro nombre, y avisa.
+${MARK_END}`;
 }
 
 export function reminder(name) {
@@ -44,7 +54,9 @@ export function hasRules(cwd) {
 // Idempotente: crea CLAUDE.md o reemplaza solo nuestro bloque, sin tocar el resto.
 export function installRules(cwd, name, { lessons = true, context = true } = {}) {
   const file = path.join(cwd, 'CLAUDE.md');
-  const block = rulesBlock(name, { lessons, context });
+  const lessonsFile = lessonsRel(cwd);
+  const contextFile = contextRelOf(cwd);
+  const block = rulesBlock(name, { lessons, context, lessonsFile, contextFile });
   let txt = '';
   let existed = false;
   try { txt = fs.readFileSync(file, 'utf8'); existed = true; } catch { /* no existe */ }
@@ -54,23 +66,28 @@ export function installRules(cwd, name, { lessons = true, context = true } = {})
   if (re.test(txt)) { out = txt.replace(re, block); action = 'actualizado'; }
   else if (existed && txt.trim()) { out = txt.replace(/\s*$/, '') + '\n\n' + block + '\n'; action = 'añadido al final'; }
   else { out = block + '\n'; action = 'creado'; }
-  if (out !== txt) fs.writeFileSync(file, out);
+  if (out !== txt) {
+    // copia de seguridad una sola vez, antes de tocar tu CLAUDE.md
+    const bak = file + '.bak-router';
+    if (existed && txt.trim() && !fs.existsSync(bak)) fs.writeFileSync(bak, txt);
+    fs.writeFileSync(file, out);
+  }
   let lessonsCreated = false;
   if (lessons) {
-    const lf = path.join(cwd, LESSONS_REL);
+    const lf = path.join(cwd, lessonsFile);
     if (!fs.existsSync(lf)) {
       fs.mkdirSync(path.dirname(lf), { recursive: true });
       fs.writeFileSync(lf, LESSONS_HEADER);
       lessonsCreated = true;
     }
   }
-  return { file, action, changed: out !== txt, lessonsCreated };
+  return { file, action, changed: out !== txt, lessonsCreated, lessonsFile, contextFile, backup: existed && txt.trim() && out !== txt && fs.existsSync(file + '.bak-router') };
 }
 
 // Lecciones guardadas (una por línea, ignorando cabecera y comentarios)
 export function lessonsInfo(cwd) {
   try {
-    const lines = fs.readFileSync(path.join(cwd, LESSONS_REL), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.startsWith('<!--'));
+    const lines = fs.readFileSync(path.join(cwd, lessonsRel(cwd)), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.startsWith('<!--'));
     return { exists: true, count: lines.length, lines };
   } catch {
     return { exists: false, count: 0, lines: [] };

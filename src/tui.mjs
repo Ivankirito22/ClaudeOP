@@ -1,6 +1,7 @@
 // Vista de terminal (blessed) sobre el controlador común. Se abre con `cla --terminal`.
 // Ojo: en Windows el ratón NO llega a Node de forma fiable; la interfaz por defecto es la web (src/web.mjs).
 // Aquí todo funciona con teclado: Tab/↑↓ para moverte por el menú, Enter para pulsar, Ctrl+B para ir al menú.
+import { notifyOS } from './notify.mjs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { TIERS } from './core.mjs';
@@ -57,8 +58,11 @@ export function start(cwd = process.cwd()) {
   let groupsState = {}; // name -> open
   let boxes = [];
 
+  // Los emojis anchos descuadran el dibujo parcial de la pantalla en muchas consolas: en terminal los cambiamos por símbolos simples
+  const NARROW = { '⏳': '…', '➕': '+', '🛡': '[!]', '🗜': '~', '⏸': '||', '▶': '>', '🧩': '*' };
+  const narrow = (t) => String(t).replace(/⏳|➕|🛡|🗜|⏸|▶|🧩/g, (m) => NARROW[m]);
   const log = (t = ' ') => {
-    for (const line of String(t).split('\n')) logBox.log(line === '' ? ' ' : line);
+    for (const line of narrow(t).split('\n')) logBox.log(line === '' ? ' ' : line);
     screen.render();
   };
   const focusInput = () => setImmediate(() => { if (menuMode) return; if (!input._reading) input.readInput(); screen.render(); });
@@ -70,6 +74,8 @@ export function start(cwd = process.cwd()) {
     changed: () => { render(); },
     quit: () => { screen.destroy(); process.exit(0); },
     spawn: (file, args, opts) => screen.spawn(file, args, opts),
+    // En terminal no sabemos si estás mirando la ventana: avisos importantes siempre, "terminada" solo si fue larga
+    notify: (n) => { if (n.kind === 'done' && n.ms < 20000) return; notifyOS(n.title, n.body); },
     usePrefill: true,
     verboseTray: true,
     shortcuts: 'Ctrl+B menú (↑↓ Enter, Espacio pliega) · Ctrl+X cancela · Ctrl+L limpia el chat · Ctrl+Q sale · ↑↓ historial · AvPág desplaza',
@@ -94,10 +100,10 @@ export function start(cwd = process.cwd()) {
     const live = s.busy
       ? `${SPIN[spin % SPIN.length]} {${COLOR[s.active?.tier || 'other']}-fg}${s.active ? s.active.tier : 'pensando'}${s.active?.agent ? ' · ' + s.active.agent : ''}{/}${runTime(s)}`
       : s.plan ? '{yellow-fg}plan esperando: Enter ejecuta · x cancela{/}'
-      : s.routing ? '{green-fg}Haiku leyendo tu frase…{/}'
+      : s.routing ? '{green-fg}⏳ creando el plan (Haiku)…{/}'
       : s.pending?.main ? `{${COLOR[s.pending.main]}-fg}próxima: ${s.pending.main}{/}` : s.queueRunning ? '{yellow-fg}cola…{/}' : '{gray-fg}en espera{/}';
     const where = blessed.escape(path.basename(cwd) || cwd) + (s.stack ? ` {gray-fg}(${blessed.escape(s.stack)}){/}` : '');
-    header.setContent(` {bold}claude-router{/bold} v${s.version}  ${where}  |  {bold}${s.profile.label}{/bold}  |  ${s.permission}  |  ${authBadge}  |  ${live}${s.tray.length ? '  |  {green-fg}bandeja: ' + blessed.escape(s.tray.map((t) => t.label).join(' + ')) + '{/}' : ''}${s.update ? '  |  {yellow-fg}⬆ ' + s.update + '{/}' : ''}`);
+    header.setContent(` {bold}claude-router{/bold} v${s.version}  ${where}  |  {bold}${s.profile.label}{/bold}  |  ${s.permission}  |  ${authBadge}  |  ${live}${s.tray.length ? '  |  {green-fg}bandeja: ' + blessed.escape(s.tray.map((t) => t.label).join(' + ')) + '{/}' : ''}${s.next && s.next.length ? '  |  {cyan-fg}siguientes: ' + s.next.length + (s.nextPaused ? ' (pausa: /seguir)' : '') + '{/}' : ''}${s.update ? '  |  {yellow-fg}⬆ ' + s.update + '{/}' : ''}`);
   }
 
   function renderPanel() {
@@ -115,7 +121,7 @@ export function start(cwd = process.cwd()) {
     const status = d.total === 0 ? '{gray-fg}sin datos{/}' : d.level === 0 ? '{green-fg}✔ ok{/}' : d.level === 1 ? '{yellow-fg}⚠ 1 fallo{/}' : `{red-fg}✖ ${d.strikes} fallos{/}`;
     panel.setContent([
       tiers,
-      `{gray-fg}~$${s.cost.toFixed(2)} · caché ${Math.round(s.cacheRatio * 100)}%{/}   ctx {${cc}-fg}${kfmt(s.ctx)}{/}${narrow ? '' : ' ' + bar(Math.min(ratio, 1), 8)}   ${deleg}`,
+      `{gray-fg}~$${s.cost.toFixed(2)} · caché ${Math.round(s.cacheRatio * 100)}%{/}   ctx {${cc}-fg}${Math.round(Math.min(ratio, 9.99) * 100)}% ${kfmt(s.ctx)}{/}${narrow ? '' : ' ' + bar(Math.min(ratio, 1), 8)}   ${deleg}`,
       `nombre «${blessed.escape(s.userName)}» ${status}   ${s.repo ? `{green-fg}git ✔{/} ${s.ckptCount} fotos` : '{yellow-fg}sin git{/}'}   cola ${s.queueLen}   verif. ${s.verify}${narrow ? '' : `   recuerdo c/${s.remindEvery || '—'}`}`,
     ].join('\n'));
   }

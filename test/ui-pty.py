@@ -153,7 +153,7 @@ check('/permitir y /permitidos', waitfor('Permitido en este proyecto','blender')
 typ('/verificar siempre')
 check('/verificar siempre', waitfor('Verificación → siempre'))
 typ('/lecciones')
-check('/lecciones', waitfor('lecciones'))
+check('/lecciones', waitfor('Lecciones del proyecto'))
 typ('/push on')
 check('/push on avisa', waitfor('git push'))
 

@@ -132,8 +132,10 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
       for (const e of stepMap.values()) if (!e.end) { e.end = end; broadcast('stepend', { id: e.id, end, error: false }); }
     },
     setInput(text) { broadcast('input', { text: text || '' }); },
+    notify(n) { broadcast('notify', n); },
     focusInput() {},
     planInLog: false, // el plan se ve como tarjeta con checks
+    routingInLog: false, // «creando el plan» se ve como tarjeta con spinner
     changed() {
       if (stateTimer) return;
       stateTimer = setTimeout(() => { stateTimer = null; broadcast('state', fullState()); }, 80);
@@ -158,7 +160,7 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
     clearTimeout(idleTimer);
     idleTimer = setTimeout(function check() {
       if (clients.size > 0) return;
-      if (app.session.busy || app.queueRunning) { idleTimer = setTimeout(check, 15000); return; }
+      if (app.session.busy || app.queueRunning || app.snapshot().next.length) { idleTimer = setTimeout(check, 15000); return; }
       if (!quiet) console.log('\nVentana cerrada: claude-router se apaga. Vuelve a escribir  cla  cuando quieras.');
       shutdown(0);
     }, idleMs);
@@ -243,6 +245,13 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
           case '/api/plan-toggle': return ok({ found: app.planToggle(String(body.id || '').slice(0, 80)) });
           case '/api/plan-run': app.planRun(); return ok();
           case '/api/plan-cancel': app.planCancel(); return ok();
+          case '/api/perm-allow': app.permAllow(); return ok();
+          case '/api/perm-deny': app.permDeny(); return ok();
+          case '/api/skip-routing': app.skipRouting(); return ok();
+          case '/api/next-remove': return ok({ found: app.nextRemove(body.id) });
+          case '/api/next-up': return ok({ found: app.nextUp(body.id) });
+          case '/api/next-clear': app.nextClear(); return ok();
+          case '/api/next-resume': app.nextResume(); return ok();
           default: return deny(res, 404, 'no existe');
         }
       }

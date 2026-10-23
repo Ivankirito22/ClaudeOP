@@ -1,6 +1,6 @@
 {
   "name": "claude-router",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Panel con botones para Claude Code: Sonnet coordina y reparte el trabajo entre Haiku/Sonnet/Opus dentro de cada instrucción",
   "type": "module",
   "bin": {

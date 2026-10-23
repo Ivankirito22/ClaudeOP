@@ -567,7 +567,29 @@ assert.equal(r1.cost, 0.0123);
 
   // estado del resumen
   assert.equal(docsm.digestState(proj, found).exists, false);
-  put(docsm.CONTEXT_REL, '# Contexto\n');
+  // un contexto.md TUYO (no generado por claude-router) no se toca: se usa otro nombre
+  put(docsm.CONTEXT_REL, '# Mi contexto personal\n');
+  assert.equal(docsm.digestState(proj, found).exists, false);
+  assert.equal(docsm.contextRel(proj), path.join('.claude', 'contexto-router.md'));
+  assert.ok(docsm.contextPrompt(found, [], docsm.contextRel(proj)).includes('contexto-router.md'));
+  {
+    const rules = await import('../src/rules.mjs');
+    const lp = path.join(proj, rules.LESSONS_REL);
+    fs.mkdirSync(path.dirname(lp), { recursive: true });
+    fs.writeFileSync(lp, '- mis notas propias\n');
+    fs.writeFileSync(path.join(proj, 'CLAUDE.md'), '# Mi CLAUDE\nregla mía\n');
+    const r = rules.installRules(proj, 'Frivan', { lessons: true, context: true });
+    assert.equal(fs.readFileSync(lp, 'utf8'), '- mis notas propias\n', 'no pisa tus lecciones.md');
+    assert.ok(fs.existsSync(path.join(proj, '.claude', 'lecciones-router.md')), 'crea lecciones-router.md aparte');
+    const md = fs.readFileSync(path.join(proj, 'CLAUDE.md'), 'utf8');
+    assert.ok(md.startsWith('# Mi CLAUDE\nregla mía') && md.includes('lecciones-router.md') && md.includes('contexto-router.md') && md.includes('NUNCA sobrescribas'));
+    assert.equal(fs.readFileSync(path.join(proj, 'CLAUDE.md.bak-router'), 'utf8'), '# Mi CLAUDE\nregla mía\n', 'copia de seguridad de tu CLAUDE.md');
+    assert.ok(r.backup);
+    fs.rmSync(lp); fs.rmSync(path.join(proj, '.claude', 'lecciones-router.md'));
+    fs.writeFileSync(path.join(proj, 'CLAUDE.md'), '# Mi CLAUDE\nregla mía\n'); fs.rmSync(path.join(proj, 'CLAUDE.md.bak-router'));
+  }
+  fs.rmSync(path.join(proj, docsm.CONTEXT_REL));
+  put(docsm.CONTEXT_REL, '<!-- generado por claude-router 2026-01-01 -->\n# Contexto\n');
   const future = new Date(Date.now() + 5000);
   fs.utimesSync(path.join(proj, docsm.CONTEXT_REL), future, future);
   assert.equal(docsm.digestState(proj, found).fresh, true);
@@ -776,6 +798,242 @@ assert.equal(r1.cost, 0.0123);
     app.dispose();
   }
   delete process.env.FAKE_ECHO;
+}
+
+// 13d) feedback inmediato, consulta rápida a Haiku y cola «a continuación»
+{
+  const { createApp } = await import('../src/app.mjs');
+  const dir = fs.mkdtempSync(path.join(tmpHome, 'queue-'));
+  const mk = () => {
+    const logs = [];
+    const app = createApp(dir, { log: (t) => logs.push(String(t)), setInput() {}, focusInput() {}, changed() {}, quit() {}, shortcuts: '' });
+    return { logs, app, all: () => logs.join('\n'), n: (needle) => logs.join('\n').split(needle).length - 1 };
+  };
+  const until = async (fn, ms = 12000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await new Promise((r) => setTimeout(r, 50)); return fn(); };
+  process.env.FAKE_STEP_MS = '500';
+
+  // consulta rápida: flags de velocidad; si la versión no los conoce, se reintenta y se acuerda
+  const flagsLog = path.join(tmpHome, 'router-flags.log');
+  process.env.FAKE_ROUTER_LOG = flagsLog;
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    app.handle('créame un script en python y optimízalo');
+    await until(() => n('terminado') >= 1);
+    const l = fs.readFileSync(flagsLog, 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+    assert.equal(l.length, 1);
+    for (const f of ['--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--system-prompt', '--tools']) assert.ok(l[0].includes(f), 'consulta rápida: falta ' + f);
+    assert.ok(all().includes('Creando el plan'), 'sale «creando el plan» enseguida');
+    app.dispose();
+  }
+  fs.rmSync(flagsLog, { force: true });
+  process.env.FAKE_NO_FAST = '1';
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    app.handle('créame un script en python y optimízalo');
+    await until(() => n('terminado') >= 1);
+    assert.ok(all().includes('Haiku leyó tu petición'), 'con el reintento Haiku sigue funcionando');
+    assert.ok(!all().includes('No pude consultar a Haiku'));
+    await until(() => !app.session.busy);
+    app.handle('créame un modelo de enemigo y optimízalo');
+    await until(() => n('terminado') >= 2);
+    const l = fs.readFileSync(flagsLog, 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+    assert.equal(l.length, 3, '1ª vez: rápida + reintento; 2ª vez: solo la básica');
+    assert.ok(!l[1].includes('--strict-mcp-config') && !l[2].includes('--strict-mcp-config'));
+    app.dispose();
+  }
+  delete process.env.FAKE_NO_FAST; delete process.env.FAKE_ROUTER_LOG;
+
+  // «saltar»: no esperar a Haiku (que tarda) y seguir con palabras clave, sin avisos de error
+  process.env.FAKE_ROUTER_MS = '4000';
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    const t0 = Date.now();
+    app.handle('créame un script en python y optimízalo por favor');
+    await until(() => app.snapshot().routing);
+    const sn = app.snapshot();
+    assert.ok(sn.routing && sn.routing.start > 0, 'mientras Haiku piensa, el estado dice que está creando el plan');
+    app.skipRouting();
+    await until(() => n('terminado') >= 1);
+    assert.ok(Date.now() - t0 < 3800, 'no esperó a Haiku');
+    assert.ok(all().includes('Reconozco lo que pides') && !all().includes('No pude consultar a Haiku'));
+    app.dispose();
+  }
+  delete process.env.FAKE_ROUTER_MS;
+
+  // guardia de archivos: no sobrescribe lo que existía; pregunta; avisa; permite solo la tarea siguiente
+  {
+    const { createApp } = await import('../src/app.mjs');
+    const gdir = fs.mkdtempSync(path.join(tmpHome, 'guard-'));
+    const mine = path.join(gdir, 'mio.md');
+    fs.writeFileSync(mine, 'MIO ORIGINAL\n');
+    const logs = []; const notes = [];
+    const app = createApp(gdir, { log: (t) => logs.push(String(t)), setInput() {}, focusInput() {}, changed() {}, quit() {}, shortcuts: '', notify: (x) => notes.push(x) });
+    const all = () => logs.join('\n');
+    app.handle('/plan off');
+    app.handle('SOBREESCRIBE mio.md ahora');
+    await until(() => app.snapshot().perm);
+    assert.equal(fs.readFileSync(mine, 'utf8'), 'MIO ORIGINAL\n', 'el archivo existente no se tocó');
+    assert.ok(all().includes('lo he bloqueado') && all().includes('mio.md'));
+    assert.ok(notes.some((x) => x.kind === 'ask'), 'avisa con notificación de que necesita tu permiso');
+    assert.equal(app.snapshot().perm.files[0].rel, 'mio.md');
+    await until(() => !app.session.busy);
+    app.permAllow();
+    await until(() => fs.readFileSync(mine, 'utf8') !== 'MIO ORIGINAL\n', 15000);
+    assert.equal(fs.readFileSync(mine, 'utf8'), 'reescrito por Claude\n', 'con permiso sí se reescribe');
+    await until(() => !app.session.busy);
+    assert.ok(!fs.existsSync(path.join(app.session.guardDir, 'allow.json')), 'el permiso vale solo para esa tarea');
+    // nuevo archivo + denegar
+    fs.writeFileSync(mine, 'OTRA VEZ MIO\n');
+    app.handle('SOBREESCRIBE mio.md otra vez');
+    await until(() => app.snapshot().perm);
+    app.permDeny();
+    assert.equal(app.snapshot().perm, null);
+    await until(() => !app.session.busy);
+    assert.equal(fs.readFileSync(mine, 'utf8'), 'OTRA VEZ MIO\n');
+    assert.ok(app.session.buildArgs('sonnet').includes('--settings'), 'el hook del guardia se pasa a Claude');
+    // sin protección, pasa
+    app.handle('/proteger off');
+    app.handle('SOBREESCRIBE mio.md sin guardia');
+    await until(() => fs.readFileSync(mine, 'utf8') === 'reescrito por Claude\n', 15000);
+    assert.equal(app.snapshot().guard, false);
+    app.dispose();
+    // archivo nuevo: siempre pasa; archivos de claude-router también
+    const gd2 = fs.mkdtempSync(path.join(tmpHome, 'guard2-'));
+    const gmod = await import('../src/guard.mjs');
+    fs.mkdirSync(path.join(gd2, 'g'));
+    assert.equal(gmod.decide({ tool_name: 'Write', cwd: gd2, tool_input: { file_path: 'nuevo.txt' } }, path.join(gd2, 'g')).allow, true);
+    fs.writeFileSync(path.join(gd2, 'ctx.md'), '<!-- generado por claude-router -->\n');
+    assert.equal(gmod.decide({ tool_name: 'Write', cwd: gd2, tool_input: { file_path: 'ctx.md' } }, path.join(gd2, 'g')).allow, true, 'sus propios archivos sí');
+    assert.equal(gmod.decide({ tool_name: 'Edit', cwd: gd2, tool_input: { file_path: 'ctx.md' } }, path.join(gd2, 'g')).allow, true, 'Edit nunca se bloquea');
+    const { notifyOS } = await import('../src/notify.mjs');
+    const calls = [];
+    const fakeSp = (f, a, o) => { calls.push({ f, a, o }); return { on() {}, unref() {} }; };
+    notifyOS('Hola', 'Cuerpo', { spawnFn: fakeSp, platform: 'win32' });
+    assert.equal(calls[0].f, 'powershell.exe');
+    assert.ok(calls[0].o.env.CR_NT === 'Hola' && !calls[0].a.join(' ').includes('Cuerpo'), 'el texto va por entorno, no en el script');
+  }
+
+  // MCP y plugins desde cla (Blender, Godot…)
+  {
+    const mcpLog = path.join(tmpHome, 'mcp.log');
+    process.env.FAKE_MCP_LOG = mcpLog; process.env.CR_NO_BIN_CHECK = '1';
+    const { app, all, n } = mk();
+    app.handle('/mcp-instalar blender');
+    await until(() => all().includes('instalado'));
+    app.handle('/mcp-instalar godot C:\\Godot\\godot.exe');
+    await until(() => n('instalado') >= 2);
+    app.handle('/mcp-añadir docs npx -y @upstash/context7-mcp');
+    await until(() => n('instalado') >= 3);
+    await new Promise((r) => setTimeout(r, 600));
+    const calls = fs.readFileSync(mcpLog, 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+    if (!calls.some((c) => c.includes('docs'))) console.error(JSON.stringify(calls), all());
+    const flat = calls.map((c) => c.join(' '));
+    assert.ok(flat.some((c) => c.startsWith('mcp add --scope user blender -- ') && c.includes('uvx blender-mcp')), 'blender vía uvx, para todos los proyectos');
+    assert.ok(flat.some((c) => c.includes('-e GODOT_PATH=C:\\Godot\\godot.exe godot --') && c.includes('@coding-solo/godot-mcp')), 'godot con su ruta');
+    assert.ok(flat.some((c) => c.includes('mcp add --scope user docs -- ') && c.includes('@upstash/context7-mcp')), 'MCP propio');
+    const allow = app.session.extraAllow;
+    assert.ok(allow.includes('mcp__blender') && allow.includes('mcp__godot') && allow.includes('mcp__docs'), 'permite solo sus herramientas MCP');
+    assert.ok(all().includes('addon'), 'explica el paso que falta en Blender');
+    app.handle('/mcp-añadir mal nombre'); // dos tokens: nombre + comando = válido; probamos nombre malo
+    app.handle('/mcp-añadir ma$l npx x');
+    await until(() => all().includes('solo puede llevar'));
+    app.handle('/mcp-quitar blender');
+    await until(() => all().includes('quitado'));
+    assert.ok(!app.session.extraAllow.includes('mcp__blender'));
+    app.handle('/mcp'); await until(() => all().includes('MCP instalados'));
+    app.handle('/plugin-instalar foo@bar'); await until(() => all().includes('Plugin instalado'));
+    assert.ok(fs.readFileSync(mcpLog, 'utf8').includes('"plugin","install","foo@bar"'));
+    process.env.FAKE_MCP_FAIL = '1';
+    app.handle('/mcp-instalar blender'); await until(() => all().includes('No se pudo instalar'));
+    delete process.env.FAKE_MCP_FAIL; delete process.env.FAKE_MCP_LOG; delete process.env.CR_NO_BIN_CHECK;
+    // etiquetas ⓘ y el menú de MCP
+    const grp = app.snapshot().menu || [];
+    app.dispose();
+  }
+
+  // compactación automática: pasa del límite -> compacta y la cola sigue después, en orden
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    app.handle('/compactar-en 20');
+    assert.ok(all().includes('Compactación automática a partir de'), '/compactar-en cambia el umbral');
+    app.session.settings.compactAt = 100; // el fake gasta unos cientos de tokens: pasa seguro
+    app.handle('créame un script en python');
+    await until(() => app.session.busy);
+    app.handle('documenta el proyecto entero');
+    await until(() => n('terminado') >= 2, 25000);
+    await until(() => !app.session.busy && !app.snapshot().next.length);
+    const t = all();
+    assert.ok(t.includes('Compactando el contexto'), 'avisa de que compacta');
+    assert.ok(t.includes('Contexto compactado'), 'y de que terminó');
+    assert.ok(t.indexOf('Contexto compactado') < t.indexOf('De la cola'), 'la cola espera a la compactación');
+    app.dispose();
+  }
+
+  // cola «a continuación»: lo que escribes mientras trabaja se prepara y empieza solo, en orden
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    app.handle('créame un script en python');
+    await until(() => app.session.busy);
+    app.handle('optimiza el código del enemigo porfa');
+    app.handle('documenta el proyecto entero');
+    await until(() => app.snapshot().next.length === 2);
+    const sn = app.snapshot();
+    assert.ok(all().includes('Hay una tarea en marcha') && all().includes('A continuación (#1)') && all().includes('A continuación (#2)'));
+    assert.ok(sn.next[0].label.includes('Optimizar') && sn.next[1].text.includes('documenta'));
+    assert.ok(app.nextUp(sn.next[1].id), 'se puede subir una');
+    assert.ok(app.snapshot().next[0].text.includes('documenta'));
+    await until(() => n('terminado') >= 3, 20000);
+    assert.equal(n('terminado'), 3, 'las tres terminan solas, una detrás de otra');
+    const t = all();
+    const iDoc = t.indexOf('De la cola · Método general: documenta'), iOpt = t.indexOf('De la cola · Optimizar proyecto: optimiza');
+    assert.ok(iDoc > -1 && iOpt > -1 && iDoc < iOpt, 'respeta el orden que dejaste');
+    assert.equal(app.snapshot().next.length, 0);
+    app.dispose();
+  }
+  // quitar y vaciar; pausa al cancelar y «seguir»
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    app.handle('créame un script en python');
+    await until(() => app.session.busy);
+    app.handle('optimiza el código del enemigo porfa');
+    app.handle('documenta el proyecto entero');
+    await until(() => app.snapshot().next.length === 2);
+    assert.ok(app.nextRemove(app.snapshot().next[1].id) && app.snapshot().next.length === 1);
+    assert.ok(!app.nextRemove(9999));
+    app.cancel();
+    await until(() => app.snapshot().nextPaused);
+    assert.ok(app.snapshot().nextPaused && !app.session.busy, 'al cancelar la tarea, la cola se pone en pausa');
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(app.snapshot().next.length, 1, 'no arranca sola estando en pausa');
+    app.handle('/seguir');
+    await until(() => n('terminado') >= 1);
+    assert.equal(app.snapshot().next.length, 0);
+    assert.equal(app.snapshot().nextPaused, false);
+    app.dispose();
+  }
+  // con plan previo: también se te enseña el plan al encolar
+  {
+    const { app, all, n } = mk();
+    app.handle('/plan off');
+    app.handle('créame un script en python');
+    await until(() => app.session.busy);
+    app.handle('/plan on');
+    app.handle('créame un modelo de enemigo');
+    await until(() => app.snapshot().plan);
+    assert.equal(app.snapshot().plan.queued, true, 'el plan avisa de que irá a la cola');
+    app.planRun();
+    assert.equal(app.snapshot().next.length, 1);
+    await until(() => n('terminado') >= 2, 20000);
+    assert.equal(app.snapshot().next.length, 0);
+    app.dispose();
+  }
+  delete process.env.FAKE_STEP_MS;
 }
 
 // 12) login detectado

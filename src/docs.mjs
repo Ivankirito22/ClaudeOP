@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const CONTEXT_REL = path.join('.claude', 'contexto.md');
+// Nunca pisamos un contexto.md tuyo: si existe y no lo generó claude-router, usamos contexto-router.md
+export function contextRel(cwd) {
+  try { return fs.readFileSync(path.join(cwd, CONTEXT_REL), 'utf8').includes('claude-router') ? CONTEXT_REL : path.join('.claude', 'contexto-router.md'); } catch (e) { return e.code === 'ENOENT' ? CONTEXT_REL : path.join('.claude', 'contexto-router.md'); }
+}
 const SKIP_DIR = /^(node_modules|\.git|\.venv|venv|__pycache__|dist|build|out|target|Library|Temp|\.godot|\.next|coverage|vendor|site-packages)$/i;
 const KEEP_HIDDEN = new Set(['.claude', '.github']);
 const OWN = /^(contexto|lecciones)\.md$/i; // los generamos nosotros: no se indexan como documentación
@@ -83,7 +87,7 @@ export function docsIndex(docs, max = 25) {
 // ¿Existe el resumen y está al día respecto a los MDs?
 export function digestState(cwd, docs) {
   try {
-    const st = fs.statSync(path.join(cwd, CONTEXT_REL));
+    const st = fs.statSync(path.join(cwd, contextRel(cwd)));
     const newest = Math.max(0, ...readable(docs).map((d) => d.mtime));
     const stale = newest > st.mtimeMs + 1000;
     return { exists: true, fresh: !stale, stale, mtime: st.mtimeMs };
@@ -98,11 +102,11 @@ export function firstRunPrefix(docs, extras = []) {
   return `(Router) Primera instrucción de esta sesión. Antes de empezar, delega en explorador la lectura de la documentación del proyecto relevante para esta tarea (${top}${extras.length ? '; configuración: ' + extras.slice(0, 4).join(', ') : ''}) y pídele un resumen de máx. 15 líneas: qué es, comandos de build/test/run, convenciones y trampas. No leas tú esos MDs enteros. Si la tarea contradice la documentación, avísame antes de tocar código.`;
 }
 
-export function contextPrompt(allDocs, extras = []) {
+export function contextPrompt(allDocs, extras = [], rel = CONTEXT_REL) {
   const docs = readable(allDocs);
   const list = docs.length ? docs.map((d) => `- ${d.rel}${d.title ? ' — ' + d.title : ''}`).join('\n') : '(no hay MDs: parte del código y de los archivos de configuración)';
   const today = new Date().toISOString().slice(0, 10);
-  return `Genera el resumen de contexto del proyecto en ${CONTEXT_REL.split(path.sep).join('/')} (créalo o reescríbelo entero).
+  return `Genera el resumen de contexto del proyecto en ${rel.split(path.sep).join('/')} (créalo o reescríbelo entero; es un archivo de claude-router, no toques ningún otro MD).
 
 Fuentes:
 ${list}

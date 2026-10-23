@@ -161,8 +161,33 @@ Cuando escribes algo, **Haiku lee tu frase** (un par de segundos, casi sin gasto
 
 Antes de ejecutar un trabajo te enseña **qué va a hacer**, con todo marcado: los flujos elegidos, los pasos (explorar, documentación, plan con arquitecto, implementar, limpieza, probar, revisar, documentar, verificar…) y los especialistas que entran. Desmarcas lo que no te interesa (un flujo entero, un paso o un especialista) y pulsas **Ejecutar plan** (o Enter); lo desmarcado le llega a Claude como «NO hagas esto». Esc o **Cancelar** no ejecuta nada. En el modo terminal: escribe los números para marcar/desmarcar, Enter ejecuta, `x` cancela. Las preguntas, los cambios pequeños y las frases con `!` no piden plan. `/plan off` lo desactiva (se guarda).
 
+### «Creando el plan…», interruptor del plan y cola «a continuación»
+
+- Al pulsar Enter sale **al instante** una tarjeta «Creando el plan…» con spinner y segundos (nunca se queda la pantalla en blanco). La consulta a Haiku va con flags de velocidad (sin MCP, sin skills, sin guardar sesión, prompt mínimo; si tu versión de Claude Code no los conoce, reintenta con los básicos y se acuerda), recuerda las últimas respuestas y tiene un botón **Saltar** (usa el reconocimiento por palabras clave sin esperar).
+- El interruptor **Plan: sí/no** está siempre junto a la caja de texto (y en el plan, «Desactivar el plan previo»). `/plan on|off` hace lo mismo.
+- **A continuación** (como la cola de Spotify): si escribes algo mientras trabaja, se le crea su plan igualmente y se pone en la cola, visible sobre la caja, con ↑ para subirla, ✕ para quitarla y «vaciar». Empieza sola cuando termina la anterior. Si cancelas o falla, la cola se pausa y aparece **Seguir**. En terminal: `/siguientes`, `/siguiente-quitar N`, `/siguientes-limpiar`, `/seguir`.
+- Botón **■ Parar** en la barra de la tarea en curso.
+
+### Compactación automática
+
+El contexto se ve en % junto a las estadísticas. Al 80 % avisa; al pasar del límite (150k tokens por defecto, `/compactar-en 120` lo cambia, en miles) compacta solo con Haiku al terminar la instrucción, y también si Claude «se va» (deja de empezar con tu nombre). La cola «a continuación» espera a que termine de compactar. `/auto-compactar` lo apaga; `/compactar` lo hace a mano.
+
+### Etiquetas con información (ⓘ)
+
+Cada etiqueta del menú tiene un icono **ⓘ**: abre una ventanita que explica qué hace, **cuántos agentes usa** (con su modelo y lo que hace cada uno), los pasos en orden y la instrucción exacta que se envía. En terminal: `/info optimizar`.
+
+### Tus archivos están a salvo (y te pregunta)
+
+- **Instalar reglas** nunca sustituye nada tuyo: en `CLAUDE.md` solo añade/actualiza su bloque entre marcas (y guarda una copia `CLAUDE.md.bak-router` la primera vez). Si ya tienes un `.claude/lecciones.md` o `.claude/contexto.md` que no es suyo, usa `lecciones-router.md` / `contexto-router.md`.
+- **Guardia de archivos** (`/proteger on|off`, también en el menú): si Claude intenta *reescribir entero* (herramienta Write) un archivo que ya existía, se bloquea y te sale una tarjeta con **Permitir** (vale solo para la tarea siguiente) o **Denegar**. En terminal: `/sobrescribir` o `/no-sobrescribir`. Los archivos nuevos, los que crea en esa misma tarea, los suyos y las ediciones parciales (Edit) no se bloquean. Se implementa con un hook `PreToolUse` que cla pasa a Claude con `--settings`.
+- **Avisos del sistema** (`/avisos on|off`): notificación de Windows cuando necesita tu permiso, el plan espera tu OK, termina una tarea larga, algo falla o la cola se pausa. En la web: pulsa 🔔 y acepta el permiso del navegador (solo avisa si no estás mirando la pestaña). En terminal usa el aviso nativo del sistema (PowerShell en Windows).
+
+### Plugins y MCP (Blender, Godot…)
+
+Grupo **Plugins y MCP** del menú: *Conectar Blender* (`uvx blender-mcp`), *Conectar Godot* (`npx @coding-solo/godot-mcp`; `/mcp-instalar godot C:\ruta\Godot.exe` si no lo detecta), *Ver MCP instalados*, *Añadir otro MCP…* (`/mcp-añadir nombre comando…`), *Instalar un plugin…* (`/plugin-mercado usuario/repo` y `/plugin-instalar nombre@mercado`) y `/mcp-quitar`. Se instalan para todos tus proyectos y se permiten solo sus herramientas (`mcp__blender`, `mcp__godot`; Blender/Godot además pueden lanzarse desde consola en ese proyecto). Hace falta `uv` para Blender y Node para Godot (cla te dice cómo instalarlo si falta). Para Blender, además hay que instalar el addon en Blender (te lo explica al terminar). Si una acción falla por permisos del sistema, cla lo detecta y `/admin` reabre cla como administrador (Windows pide confirmación).
+
 Comandos: `/feature /bugprofundo /refactor /decidir /auditoria /pulir /rendimiento /release /optimizar /limpiar /md /explicar /probar /tests /documentar /bug /revisar /seguridad /commit /plugins /investigar /rapido /profundo /condensar`
-`/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /auto-compactar /continuar /nombre /presupuesto /autoflujos /plan /especialistas /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
+`/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /compactar-en /auto-compactar /info /siguientes /seguir /continuar /nombre /presupuesto /autoflujos /plan /especialistas /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
 
 ## Personalizar (acciones, subagentes y permisos tuyos)
 

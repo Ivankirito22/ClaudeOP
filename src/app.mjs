@@ -1,17 +1,18 @@
 // Controlador de claude-router, independiente de la interfaz: lo usan la web (por defecto) y la terminal (--terminal).
 // La vista solo implementa `ui`: { log(texto), setInput(texto), focusInput(), changed(), quit(), shortcuts }.
 // Los textos usan etiquetas estilo blessed ({green-fg}, {bold}, {/}); cada vista las pinta a su manera.
-import { spawn as nodeSpawn } from 'node:child_process';
+import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
+import path from 'node:path';
 import { Session, PROFILES, MODELS, TIERS, tierOf, authStatus, authLogout, claudeCmd, effectiveVerify, DEFAULT_ALLOW, isQuick } from './core.mjs';
 import { ACTIONS } from './actions.mjs';
 import { loadSettings, saveSettings, getProject, setProject, loadCustom } from './config.mjs';
-import { DriftTracker, installRules, hasRules, lessonsInfo, LESSONS_REL } from './rules.mjs';
+import { DriftTracker, installRules, hasRules, lessonsInfo, LESSONS_REL, lessonsRel } from './rules.mjs';
 import * as gitx from './git.mjs';
 import * as history from './history.mjs';
 import { detectStack, SPECIALISTS, SPEC_KEYS, specialistsFor } from './stack.mjs';
-import { newPlan, planItems, togglePlan, resolvePlan, skipNote, planLines } from './plan.mjs';
+import { newPlan, planItems, togglePlan, resolvePlan, skipNote, planLines, actionInfo } from './plan.mjs';
 import { TaskQueue } from './queue.mjs';
-import { scanDocs, digestState, contextFiles, contextPrompt, readable, CONTEXT_REL } from './docs.mjs';
+import { scanDocs, digestState, contextFiles, contextPrompt, readable, CONTEXT_REL, contextRel } from './docs.mjs';
 import { currentVersion, checkUpdate, runUpdate } from './update.mjs';
 import { composePrompt, needsText, rank, MAX_FLOWS, routerPrompt, parseRouter, localRoute, GENERAL } from './intent.mjs';
 
@@ -57,6 +58,12 @@ export function createApp(cwd, ui) {
   let active = null;
   let lastLabel = '';
   let thinking = false; // Haiku está leyendo tu petición para elegir flujos
+  let thinkStart = 0;
+  let routeSkipped = false;
+  const nextQ = []; // «A continuación»: instrucciones ya preparadas que empiezan solas cuando termina la actual
+  let nextSeq = 0;
+  const backlog = []; // lo que escribes mientras Haiku aún está creando el plan de la anterior
+  let qPaused = false; // la cola espera porque la tarea anterior se canceló o falló
   let warnedRouter = false;
   let planState = null; // plan previo esperando que lo confirmes: { plan, text, general, label, ... }
   let runMeta = null; // instrucción en curso: { start, label, est, steps, done, delegations }
@@ -70,6 +77,9 @@ export function createApp(cwd, ui) {
   let lastRunInfo = null;
   let updateInfo = null;
   let updating = false;
+  let permAsk = null; // el guardia bloqueó sobrescribir archivos: esperando tu Permitir / Denegar
+  const notify = (kind, title, body, ms) => { if (settings.notify !== false && ui.notify) { try { ui.notify({ kind, title, body: String(body || '').slice(0, 180), ms: ms || 0 }); } catch { /* nada */ } } };
+  let ctxWarned = false; // ya avisé de que el contexto se acerca al límite
   const afterIdle = []; // tareas que se ejecutan cuando termine la actual (p. ej. compactar)
 
   const persist = () => saveSettings({ ...settings, profile: session.profile, permission: session.permission });
@@ -85,9 +95,9 @@ export function createApp(cwd, ui) {
   }
 
   // ---------- Enviar instrucciones ----------
-  function send(prompt, { display, label, main, skipEcho, specialists } = {}) {
+  function send(prompt, { display, label, main, skipEcho, specialists, keepPlan } = {}) {
     if (session.busy) { log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}'); return false; }
-    planState = null;
+    if (!keepPlan) planState = null;
     // Especialistas: los que decidas/detecte el enrutador; si no, solo los 2 del proyecto y solo en trabajos de verdad
     const specs = specialists ?? (isQuick(prompt) ? [] : stack.hints.slice(0, 2));
     lastLabel = '';
@@ -142,11 +152,14 @@ export function createApp(cwd, ui) {
     const words = text.split(/\s+/).filter(Boolean).length;
     if (words < 3) return { ...localRoute(text), how: 'palabras' };
     thinking = true;
+    thinkStart = Date.now();
+    routeSkipped = false;
     refresh();
     let out = null;
     try { out = await session.classify(routerPrompt(text, allowed)); } finally { thinking = false; refresh(); }
     const r = out ? parseRouter(out, allowed.map((a) => a.cmd)) : null;
     if (r) return { ...r, how: 'haiku' };
+    if (routeSkipped) return { ...localRoute(text), how: 'palabras' };
     if (!warnedRouter) {
       warnedRouter = true;
       log('{gray-fg}(No pude consultar a Haiku para entender tu frase; uso el reconocimiento por palabras clave.){/}');
@@ -154,10 +167,16 @@ export function createApp(cwd, ui) {
     return { ...localRoute(text), how: 'palabras' };
   }
 
+  // «Saltar»: no esperar a Haiku y seguir con el reconocimiento por palabras clave
+  function skipRouting() {
+    if (!thinking) return;
+    routeSkipped = true;
+    session.skipClassify();
+  }
+
   // Bandeja + texto → Haiku elige flujos → UNA instrucción (con método general si no encaja ninguno pero es trabajo)
   async function sendTray(raw) {
-    if (thinking) return log('{gray-fg}Un segundo, estoy leyendo tu petición…{/}');
-    if (session.busy) return log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}');
+    if (thinking) { backlog.push(raw); return log('{gray-fg}⏳ Estoy creando el plan de la anterior; esta va justo detrás.{/}'); }
     let text = String(raw || '').trim();
     let literal = false;
     if (text.startsWith('!')) { literal = true; text = text.slice(1).trim(); }
@@ -171,6 +190,8 @@ export function createApp(cwd, ui) {
     log(`\n{bold}› ${esc(chosenLabel ? (text ? `${chosenLabel}: ${text}` : chosenLabel) : text)}{/bold}`);
     tray = [];
     ui.setInput('');
+    const willQueue = session.busy || queueRunning || nextQ.length > 0;
+    if (willQueue) log('{gray-fg}⏳ Hay una tarea en marcha: esto se pone a continuación en la cola (te enseño igualmente el plan).{/}');
 
     let auto = [];
     let general = false;
@@ -178,8 +199,8 @@ export function createApp(cwd, ui) {
     let techs = [];
     if (!literal && settings.autoFlows !== false && text) {
       const allowed = actions.filter((a) => isStackable(a) && a.cmd !== '/bug');
+      if (ui.routingInLog !== false) log('{gray-fg}⏳ Creando el plan… Haiku está leyendo tu frase.{/}');
       const r = await route(text, allowed);
-      if (session.busy) return log('{yellow-fg}Mientras tanto empezó otra tarea; vuelve a enviarlo cuando termine.{/}');
       auto = r.cmds.map(findAction).filter((a) => a && !chosen.includes(a));
       techs = r.kind === 'tarea' || chosen.length ? r.techs || [] : [];
       const who = r.how === 'haiku' ? 'Haiku leyó tu petición' : 'Reconozco lo que pides';
@@ -201,13 +222,74 @@ export function createApp(cwd, ui) {
       return;
     }
     launch(all, text, specs, note, literal);
+    processBacklog();
+  }
+  function processBacklog() {
+    if (thinking || planState || !backlog.length) return;
+    sendTray(backlog.shift()).catch((e) => log(`{red-fg}${esc(e.message)}{/}`));
   }
 
   function launch(all, text, specs, note, literal, extra = '') {
     const label = all.length ? all.map((a) => a.label).join(' + ') : undefined;
-    const ok = send(composePrompt(all, text) + extra, { label, skipEcho: true, specialists: specs });
+    const prompt = composePrompt(all, text) + extra;
+    if (session.busy || queueRunning || nextQ.length) return enqueue({ label, text, prompt, specs, note });
+    const ok = send(prompt, { label, skipEcho: true, specialists: specs });
     if (ok && note) log(`{gray-fg}↪ ${esc(note)}${literal ? '' : ' Para que vaya literal, empieza con «!».'}{/}`);
     refresh();
+  }
+
+  // ---------- A continuación (cola de instrucciones preparadas) ----------
+  const nextName = (q) => q.label || q.text.replace(/\s+/g, ' ').slice(0, 60) || 'Instrucción';
+  function enqueue({ label, text, prompt, specs, note }) {
+    const it = { id: ++nextSeq, label: label || null, text: text || '', prompt, specs: specs || [], note: note || '' };
+    nextQ.push(it);
+    log(`{green-fg}➕ A continuación (#${nextQ.length}):{/} ${esc(nextName(it))}${it.text && it.label ? ' {gray-fg}— ' + esc(it.text.replace(/\s+/g, ' ').slice(0, 70)) + '{/}' : ''}`);
+    refresh();
+    setTimeout(drainNext, 60); // si ya no hay nada en marcha, arranca enseguida
+    focusInput();
+  }
+  function drainNext() {
+    if (session.busy || queueRunning || qPaused || !nextQ.length) return;
+    if (afterIdle.length) return setTimeout(drainNext, 150); // primero la compactación pendiente, luego la siguiente de la cola
+    const it = nextQ.shift();
+    const ok = send(it.prompt, { label: it.label || undefined, display: `▶ De la cola · ${nextName(it)}${it.text && it.label ? ': ' + it.text : ''}`, specialists: it.specs, keepPlan: true });
+    if (!ok) nextQ.unshift(it);
+    refresh();
+  }
+  function nextRemove(id) {
+    const i = nextQ.findIndex((q) => q.id === Number(id));
+    if (i < 0) return false;
+    const [it] = nextQ.splice(i, 1);
+    log(`{gray-fg}Quitada de «a continuación»: ${esc(nextName(it))}{/}`);
+    refresh();
+    return true;
+  }
+  function nextUp(id) {
+    const i = nextQ.findIndex((q) => q.id === Number(id));
+    if (i <= 0) return false;
+    const [it] = nextQ.splice(i, 1);
+    nextQ.splice(i - 1, 0, it);
+    refresh();
+    return true;
+  }
+  function nextClear() {
+    const n = nextQ.length;
+    nextQ.length = 0;
+    qPaused = false;
+    if (n) log(`{gray-fg}Cola «a continuación» vaciada (${n}).{/}`);
+    refresh();
+  }
+  function nextResume() {
+    if (!qPaused) return;
+    qPaused = false;
+    log('{green-fg}▶ Sigo con la cola.{/}');
+    refresh();
+    setTimeout(drainNext, 30);
+  }
+  function showNext(arg) {
+    if (!nextQ.length) return log('{gray-fg}No hay nada a continuación. Mientras trabajo, lo que me escribas se pone aquí.{/}');
+    log(`\n{bold}A continuación (${nextQ.length}){/bold}${qPaused ? ' {yellow-fg}⏸ en pausa (/seguir){/}' : ''}\n${nextQ.map((q, i) => `  ${i + 1}. ${esc(nextName(q))}${q.text && q.label ? ' {gray-fg}— ' + esc(q.text.replace(/\s+/g, ' ').slice(0, 60)) + '{/}' : ''}`).join('\n')}\n  {gray-fg}/siguiente-quitar N · /siguientes-limpiar · /seguir{/}`);
+    return undefined;
   }
 
   // ---------- Plan previo con checks ----------
@@ -217,6 +299,7 @@ export function createApp(cwd, ui) {
   }
   function showPlan(st) {
     planState = st;
+    notify('plan', 'Plan listo', 'Revisa los checks y pulsa Ejecutar plan.');
     if (ui.planInLog !== false) printPlan();
     refresh();
     focusInput();
@@ -229,7 +312,6 @@ export function createApp(cwd, ui) {
   }
   function planRun() {
     if (!planState) return;
-    if (session.busy) return log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}');
     const { plan, text, note } = planState;
     const r = resolvePlan(plan);
     planState = null;
@@ -237,6 +319,7 @@ export function createApp(cwd, ui) {
     const off = r.skipped.length ? `${r.skipped.length} paso(s) desmarcado(s)` : '';
     log(`{gray-fg}✔ Plan confirmado: ${esc(r.flows.map((f) => f.label).join(' + ') || 'tu texto')}${r.skipped.length ? ' · sin: ' + esc(r.skipped.map((x) => x.label).join(', ')) : ''}${r.specs.length ? ' · con: ' + esc(r.specs.map((k) => SPECIALISTS[k].tag).join(', ')) : ''}{/}`);
     launch(r.flows, text, r.specs, [note, off].filter(Boolean).join(' · '), true, skipNote(r.skipped));
+    processBacklog();
   }
   function planCancel() {
     if (!planState) return;
@@ -244,6 +327,7 @@ export function createApp(cwd, ui) {
     log('{gray-fg}Plan cancelado: no se ha hecho nada.{/}');
     refresh();
     focusInput();
+    processBacklog();
   }
   // Tecleado: números marcan/desmarcan, Enter ejecuta, x cancela
   function planInput(text) {
@@ -469,19 +553,22 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
   async function doCompact(reason) {
     if (session.busy) return log('{yellow-fg}Hay una tarea en curso; compacto cuando termine (o cancela).{/}');
     if (!session.sessionId) return log('{gray-fg}No hay sesión que compactar todavía.{/}');
-    log(`{yellow-fg}Compactando (${reason || 'manual'}) con Haiku, sin herramientas…{/}`);
+    const before = session.lastCtx || 0;
+    log(`{yellow-fg}🗜 Compactando el contexto (${reason || 'manual'})${before ? ' · ' + kfmt(before) + ' tokens' : ''} con Haiku, sin herramientas…{/}`);
+    ctxWarned = false;
     const s = await session.compact().catch((e) => { log(`{red-fg}${esc(e.message)}{/}`); return null; });
     if (s) {
       drift.reset();
-      log(`{green-fg}✔ Contexto compactado{/} en ${s.length} caracteres. La próxima instrucción arranca limpia con ese resumen y las reglas reforzadas.`);
+      log(`{green-fg}✔ Contexto compactado{/}${before ? ' (de ' + kfmt(before) + ' tokens a un resumen de ' + kfmt(Math.round(s.length / 4)) + ')' : ''}. La próxima instrucción arranca limpia con ese resumen y las reglas reforzadas.`);
     }
     refresh();
+    setTimeout(drainNext, 60);
     focusInput();
   }
 
   function showLessons() {
     const l = lessonsInfo(cwd);
-    if (!l.exists) return log(`{gray-fg}Aún no hay lecciones. Pulsa «Instalar reglas» y Claude irá apuntando en ${esc(LESSONS_REL)} lo que aprenda al arreglar bugs.{/}`);
+    if (!l.exists) return log(`{gray-fg}Aún no hay lecciones. Pulsa «Instalar reglas» y Claude irá apuntando en ${esc(lessonsRel(cwd))} lo que aprenda al arreglar bugs.{/}`);
     log(`\n{bold}Lecciones del proyecto{/bold} (${l.count})${l.count > 40 ? ' {yellow-fg}— son muchas: pulsa «Condensar lecciones» para ahorrar tokens{/}' : ''}\n${l.lines.slice(-12).map((x) => '  ' + esc(x)).join('\n') || '  {gray-fg}(vacío){/}'}`);
   }
 
@@ -532,15 +619,191 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
   function doContext() {
     rescanDocs();
     pending = null;
-    send(contextPrompt(docs, contextFiles(cwd)), { label: CONTEXT_LABEL, main: 'haiku' });
+    send(contextPrompt(docs, contextFiles(cwd), contextRel(cwd)), { label: CONTEXT_LABEL, main: 'haiku' });
     focusInput();
+  }
+
+
+  // ---------- Guardia de archivos y avisos ----------
+  function toggleSetting(key, arg, name, onText, offText) {
+    const a = String(arg || '').trim().toLowerCase();
+    settings[key] = ['on', 'si', 'sí'].includes(a) ? true : ['off', 'no'].includes(a) ? false : settings[key] === false;
+    log(settings[key] ? `{green-fg}${name}: sí.{/} ${onText}` : `{bold}${name}: no.{/} ${offText}`);
+    persist();
+    refresh();
+  }
+  const relOf = (p) => { const r = path.relative(cwd, p); return r && !r.startsWith('..') ? r : p; };
+  function askOverwrite(files) {
+    permAsk = { files, ts: Date.now() };
+    const list = files.map((f) => '  • ' + esc(relOf(f))).join('\n');
+    log(`\n{yellow-fg}🛡 Claude quiso reescribir entero ${files.length > 1 ? 'estos archivos, que ya existían' : 'un archivo que ya existía'} y lo he bloqueado:{/}\n${list}\n  {bold}¿Le dejo sobrescribir?{/} Pulsa «Permitir» (vale solo para la próxima tarea) o «Denegar». En terminal: /sobrescribir o /no-sobrescribir.`);
+    notify('ask', 'Claude necesita tu permiso', `Quiere sobrescribir ${files.length > 1 ? files.length + ' archivos' : relOf(files[0])}.`);
+    refresh();
+  }
+  function permAllow() {
+    if (!permAsk) return log('{gray-fg}No hay nada pendiente de permiso.{/}');
+    const files = permAsk.files;
+    permAsk = null;
+    session.approveFiles(files);
+    log(`{green-fg}✔ Permitido sobrescribir:{/} ${esc(files.map(relOf).join(', '))} {gray-fg}(solo en la próxima tarea){/}`);
+    launch([], `Antes intentaste reescribir entero ${files.map(relOf).join(', ')} y se bloqueó. Ahora el usuario te lo permite SOLO para ${files.length > 1 ? 'esos archivos' : 'ese archivo'}: repite lo que estabas haciendo.`, [], '', true);
+    refresh();
+  }
+  function permDeny() {
+    if (!permAsk) return log('{gray-fg}No hay nada pendiente de permiso.{/}');
+    permAsk = null;
+    log('{gray-fg}Vale: esos archivos no se tocan.{/}');
+    refresh();
+  }
+
+  // ---------- Plugins y servidores MCP (Blender, Godot…) ----------
+  const IS_WIN = process.platform === 'win32';
+  const MCP_PRESETS = {
+    blender: {
+      label: 'Blender', name: 'blender', cmd: ['uvx', 'blender-mcp'], needs: 'uv',
+      allow: ['mcp__blender', 'Bash(blender:*)'],
+      after: 'Falta una cosa en Blender: instala su addon (addon.py del repo https://github.com/ahujasid/blender-mcp: Edit > Preferences > Add-ons > Install…) y pulsa «Connect» en la pestaña BlenderMCP del panel lateral (tecla N). Con Blender abierto y conectado, Claude ya puede crear y modificar la escena.',
+    },
+    godot: {
+      label: 'Godot', name: 'godot', cmd: ['npx', '@coding-solo/godot-mcp'], needs: 'npx',
+      allow: ['mcp__godot', 'Bash(godot:*)'],
+      after: 'Necesita Godot instalado. Si no lo encuentra solo, vuelve a instalarlo con la ruta: /mcp-instalar godot C:\\ruta\\a\\Godot.exe',
+    },
+  };
+  const hasBin = (b) => { if (process.env.CR_NO_BIN_CHECK) return true; try { return spawnSync(IS_WIN ? 'where' : 'which', [b], { encoding: 'utf8' }).status === 0; } catch { return false; } };
+  // En Windows nativo, npx hay que lanzarlo con cmd /c (si no, Claude Code no lo arranca)
+  const winWrap = (cmd) => (IS_WIN && /^npx(\.cmd)?$/i.test(cmd[0]) ? ['cmd', '/c', ...cmd] : cmd);
+  function runClaude(args, label) {
+    return new Promise((resolve) => {
+      const c = claudeCmd(args);
+      let out = '';
+      const child = nodeSpawn(c.file, c.args, { shell: c.shell, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      const t = setTimeout(() => { try { child.kill(); } catch { /* nada */ } }, 90000);
+      child.stdout?.on('data', (d) => (out += d));
+      child.stderr?.on('data', (d) => (out += d));
+      child.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: e.message }); });
+      child.on('exit', (code) => { clearTimeout(t); resolve({ code, out: out.trim() }); });
+      if (label) log(`{gray-fg}$ claude ${esc(args.join(' '))}{/}`);
+    });
+  }
+  const showOut = (r) => { if (r.out) log(r.out.split('\n').slice(0, 25).map((l) => '  {gray-fg}' + esc(l) + '{/}').join('\n')); };
+
+  async function mcpAdd(name, cmdArgs, { env = {}, allow = [], after = '' } = {}) {
+    if (!/^[\w-]+$/.test(name)) return log('{red-fg}El nombre del MCP solo puede llevar letras, números, - y _.{/}');
+    if (!cmdArgs.length) return log('{red-fg}Falta el comando del servidor, p. ej. /mcp-añadir miweb npx -y paquete{/}');
+    if (session.busy) return log('{yellow-fg}Hay una tarea en curso; instala el MCP cuando termine.{/}');
+    const args = ['mcp', 'add', '--scope', 'user'];
+    for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
+    args.push(name, '--', ...winWrap(cmdArgs));
+    log(`{yellow-fg}Instalando el MCP «${esc(name)}» en tu Claude (para todos tus proyectos)…{/}`);
+    const r = await runClaude(args, true);
+    if (r.code !== 0 && !/already exists/i.test(r.out)) {
+      showOut(r);
+      log(`{red-fg}No se pudo instalar el MCP «${esc(name)}».{/} {gray-fg}Comprueba que tienes Claude Code actualizado (/actualizar) y que el comando existe.{/}`);
+      return refresh();
+    }
+    if (/already exists/i.test(r.out)) log(`{gray-fg}«${esc(name)}» ya estaba instalado; lo dejo como está.{/}`);
+    const rules = allow.filter((x) => !session.extraAllow.includes(x));
+    if (rules.length) {
+      session.extraAllow = [...session.extraAllow, ...rules];
+      setProject(cwd, { allow: session.extraAllow });
+    }
+    log(`{green-fg}✔ MCP «${esc(name)}» instalado.{/} Desde tu próxima instrucción Claude ve sus herramientas.${rules.length ? `\n  {gray-fg}Permitido sin preguntar en este proyecto: ${esc(rules.join(', '))} (quítalo cuando quieras con tu configuración).{/}` : ''}${after ? '\n  ' + esc(after) : ''}`);
+    refresh();
+    focusInput();
+  }
+
+  async function mcpInstallPreset(arg) {
+    const [key, ...rest] = String(arg || '').trim().split(/\s+/);
+    const p = MCP_PRESETS[String(key || '').toLowerCase()];
+    if (!p) return log(`Uso: /mcp-instalar ${Object.keys(MCP_PRESETS).join('|')}   (o /mcp-añadir nombre comando… para cualquier otro)`);
+    if (!hasBin(p.needs)) {
+      return log(p.needs === 'uv'
+        ? `{yellow-fg}Para el MCP de ${p.label} hace falta «uv» (uvx) y no lo encuentro.{/} Instálalo y reinicia cla:\n  Windows (PowerShell): powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"\n  Mac/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh`
+        : `{yellow-fg}Para el MCP de ${p.label} hace falta Node.js (npx) y no lo encuentro.{/}`);
+    }
+    const env = {};
+    const gp = rest.join(' ').replace(/^["']|["']$/g, '');
+    if (key.toLowerCase() === 'godot' && gp) env.GODOT_PATH = gp;
+    return mcpAdd(p.name, p.cmd, { env, allow: p.allow, after: p.after });
+  }
+
+  function mcpAddCustom(arg) {
+    const t = String(arg || '').trim().split(/\s+/).filter(Boolean);
+    if (t.length < 2) return log('Uso: /mcp-añadir nombre comando [args…]   p. ej.  /mcp-añadir docs npx -y @upstash/context7-mcp\n{gray-fg}Se instala en tu Claude para todos los proyectos y se permite solo ese MCP (mcp__nombre).{/}');
+    const [name, ...cmd] = t;
+    return mcpAdd(name, cmd, { allow: [`mcp__${name}`] });
+  }
+
+  async function mcpList() {
+    log('{gray-fg}Consultando los MCP de tu Claude…{/}');
+    const r = await runClaude(['mcp', 'list']);
+    if (!r.out) log('{gray-fg}No hay MCP instalados. Prueba «Conectar Blender» o «Conectar Godot».{/}');
+    else log(`\n{bold}MCP instalados{/bold}`), showOut(r);
+  }
+
+  async function mcpRemove(arg) {
+    const name = String(arg || '').trim();
+    if (!/^[\w-]+$/.test(name)) return log('Uso: /mcp-quitar nombre   (mira los nombres con /mcp)');
+    const r = await runClaude(['mcp', 'remove', '--scope', 'user', name], true);
+    showOut(r);
+    if (r.code === 0) {
+      session.extraAllow = session.extraAllow.filter((x) => x !== `mcp__${name}`);
+      setProject(cwd, { allow: session.extraAllow });
+      log(`{green-fg}MCP «${esc(name)}» quitado.{/}`);
+    }
+  }
+
+  async function pluginInstall(arg) {
+    const spec = String(arg || '').trim();
+    if (!spec || /\s/.test(spec)) return log('Uso: /plugin-instalar nombre@mercado   p. ej.  /plugin-instalar engineering@claude-plugins-official\n{gray-fg}Si el mercado es nuevo, antes: /plugin-mercado usuario/repositorio{/}');
+    log(`{yellow-fg}Instalando el plugin ${esc(spec)}…{/}`);
+    const r = await runClaude(['plugin', 'install', spec], true);
+    showOut(r);
+    log(r.code === 0 ? '{green-fg}✔ Plugin instalado.{/} Se carga desde tu próxima instrucción.' : '{red-fg}No se pudo instalar el plugin (¿nombre o mercado incorrectos? Mira /plugin-lista).{/}');
+  }
+  async function pluginMarket(arg) {
+    const src = String(arg || '').trim();
+    if (!src || /\s/.test(src)) return log('Uso: /plugin-mercado usuario/repositorio   (añade un mercado de plugins de GitHub)');
+    const r = await runClaude(['plugin', 'marketplace', 'add', src], true);
+    showOut(r);
+    log(r.code === 0 ? '{green-fg}✔ Mercado añadido.{/} Ahora /plugin-instalar nombre@mercado.' : '{red-fg}No se pudo añadir el mercado.{/}');
+  }
+  async function pluginList() {
+    const r = await runClaude(['plugin', 'list']);
+    log(r.out ? '\n{bold}Plugins{/bold}' : '{gray-fg}No hay plugins instalados.{/}');
+    showOut(r);
+  }
+
+  // ¿Hace falta administrador? Si una herramienta falla por permisos del sistema, lo decimos claro
+  const ADMIN_RE = /requires? elevation|run as administrator|administrator privileges|acceso denegado|access is denied|EACCES|EPERM|operation not permitted/i;
+  let adminHinted = false;
+  function adminHint(text) {
+    if (adminHinted || !ADMIN_RE.test(String(text || ''))) return;
+    adminHinted = true;
+    notify('admin', 'Hace falta administrador', 'Escribe /admin para reabrir cla con permisos de administrador.');
+    log(`{yellow-fg}🛡 Parece que esa acción necesita permisos de administrador del sistema.{/} Escribe {bold}/admin{/bold} para reabrir cla como administrador (Windows te pedirá confirmar), o ábrelo tú con clic derecho → Ejecutar como administrador.`);
+  }
+  function relaunchAdmin() {
+    if (!IS_WIN) return log('{gray-fg}/admin es para Windows. En Mac/Linux abre cla con sudo solo si es imprescindible (no se recomienda).{/}');
+    if (session.busy) return log('{yellow-fg}Espera a que termine la tarea en curso.{/}');
+    const q = (x) => `'${String(x).replace(/'/g, "''")}'`;
+    const argList = [process.argv[1], ...process.argv.slice(2)].map(q).join(',');
+    log('{yellow-fg}Reabriendo cla como administrador… Windows te pedirá permiso; esta ventana se cerrará.{/}');
+    const ps = `Start-Process -FilePath ${q(process.execPath)} -ArgumentList ${argList} -WorkingDirectory ${q(cwd)} -Verb RunAs`;
+    const child = nodeSpawn('powershell.exe', ['-NoProfile', '-Command', ps], { stdio: 'ignore', windowsHide: true });
+    child.on('error', (e) => log(`{red-fg}No pude pedir administrador: ${esc(e.message)}{/}`));
+    child.on('exit', (code) => {
+      if (code === 0) setTimeout(() => ui.quit(), 800);
+      else log('{red-fg}No se concedió el permiso de administrador (¿cancelaste el aviso?).{/}');
+    });
   }
 
   // ---------- Permisos ----------
   function addAllow(arg) {
     const rule = String(arg || '').trim();
     if (!rule) return log('Uso: /permitir Bash(blender:*)   ·   /permitir Bash(npm run dev:*)   ·   /permitidos para ver la lista');
-    if (!/^[A-Za-z]+(\(.+\))?$/.test(rule)) return log('{red-fg}Formato: Herramienta o Herramienta(patrón), p. ej. Bash(blender:*){/}');
+    if (!/^[A-Za-z0-9_-]+(\(.+\))?$/.test(rule)) return log('{red-fg}Formato: Herramienta o Herramienta(patrón), p. ej. Bash(blender:*){/}');
     session.extraAllow = [...new Set([...session.extraAllow, rule])];
     setProject(cwd, { allow: session.extraAllow });
     log(`{green-fg}Permitido en este proyecto: ${esc(rule)}{/} {gray-fg}(se aplica desde la próxima instrucción){/}`);
@@ -628,6 +891,7 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
       between: async () => { const q = afterIdle.splice(0); for (const fn of q) await fn(); },
     }).catch((e) => ({ done: 0, total: 0, remaining: queue.items.length, cost: 0, stopReason: e.message }));
     queueRunning = false;
+    setTimeout(drainNext, 80);
     log(`\n{bold}■ Cola ${res.stopReason ? 'detenida' : 'terminada'}{/bold}: ${res.done}/${res.total} hechas · quedan ${res.remaining} · ~$${res.cost.toFixed(2)}${res.stopReason ? ' · ' + esc(res.stopReason) : ''}${repo ? '\n  {gray-fg}Mira /cambios y, si algo no te gusta, /deshacer.{/}' : ''}`);
     refresh();
     focusInput();
@@ -686,7 +950,7 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
 {bold}Comandos{/bold}
   ${actions.map((a) => a.cmd).join('  ')}
   /cambios /deshacer /rehacer /git-init /informe [días] /lecciones /docs /contexto /stack /verificar /permitir X /permitidos /push /recordatorio N
-  /reglas /recordar /compactar /auto-compactar /continuar /nombre X /presupuesto N|off /autoflujos /plan /especialistas /actualizar
+  /reglas /recordar /sobrescribir /no-sobrescribir /proteger /avisos /mcp /mcp-instalar blender|godot /mcp-añadir /mcp-quitar /plugin-instalar /plugin-mercado /plugin-lista /admin /info X /compactar /compactar-en N /auto-compactar /continuar /nombre X /presupuesto N|off /autoflujos /plan /especialistas /siguientes /seguir /actualizar
   /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir
 ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   }
@@ -716,6 +980,37 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     '/docs': showDocs,
     '/contexto': doContext,
     '/compactar': () => doCompact('manual'),
+    '/sobrescribir': permAllow,
+    '/no-sobrescribir': permDeny,
+    '/proteger': (a) => toggleSetting('guard', a, 'Protección de archivos', 'Claude NO puede sobrescribir un archivo que ya existía sin tu permiso (te avisa y eliges Permitir o Denegar).', 'Claude puede reescribir archivos existentes sin preguntar.'),
+    '/avisos': (a) => toggleSetting('notify', a, 'Avisos del sistema', 'Te aviso con una notificación cuando necesite algo de ti, termine una tarea larga o falle algo.', 'Sin notificaciones del sistema.'),
+    '/mcp': mcpList,
+    '/mcp-instalar': mcpInstallPreset,
+    '/mcp-añadir': mcpAddCustom,
+    '/mcp-quitar': mcpRemove,
+    '/plugin-instalar': pluginInstall,
+    '/plugin-mercado': pluginMarket,
+    '/plugin-lista': pluginList,
+    '/admin': relaunchAdmin,
+    '/info': (arg) => {
+      const q = String(arg || '').trim().toLowerCase().replace(/^\//, '');
+      const a = actions.find((x) => x.cmd.slice(1) === q || x.label.toLowerCase().includes(q));
+      if (!q || !a) return log('{gray-fg}Escribe /info y el nombre de una etiqueta, p. ej. /info optimizar. Las etiquetas: ' + esc(actions.map((x) => x.cmd.slice(1)).join(', ')) + '{/}');
+      const i = actionInfo(a);
+      const TN = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' };
+      log(`\n{bold}${esc(a.label)}{/bold}  {gray-fg}${esc(a.cmd)}{/}\n${esc(i.what)}\n  {gray-fg}${esc(i.main)}{/}` +
+        (i.agents.length ? `\n  {bold}Usa ${i.agents.length} agente${i.agents.length > 1 ? 's' : ''}:{/bold}\n${i.agents.map((g) => `    ● ${g.who} · ${TN[g.tier]} — ${esc(g.does.join(' · '))}`).join('\n')}` : '\n  {gray-fg}No llama a subagentes.{/}') +
+        (i.flow && i.steps.length > 1 ? `\n  {bold}Pasos:{/bold} ${esc(i.steps.map((x) => x.label).join(' → '))}` : ''));
+    },
+    '/compactar-en': (n) => {
+      const k = parseInt(String(n || '').replace(/k$/i, ''), 10);
+      if (!Number.isInteger(k) || k < 20 || k > 900) return log(`{gray-fg}Compacto a partir de ${kfmt(settings.compactAt)} tokens. Cámbialo con /compactar-en 120 (en miles de tokens, entre 20 y 900).{/}`);
+      settings.compactAt = k * 1000;
+      ctxWarned = false;
+      persist();
+      log(`{bold}Compactación automática a partir de ${kfmt(settings.compactAt)} tokens.{/}`);
+      refresh();
+    },
     '/auto-compactar': toggleAutoCompact,
     '/nombre': setName,
     '/presupuesto': setBudget,
@@ -724,6 +1019,10 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     '/push': setPush,
     '/autoflujos': toggleAutoFlows,
     '/plan': togglePlanPreview,
+    '/siguientes': showNext,
+    '/siguiente-quitar': (n) => { log(nextRemove(nextQ[parseInt(n, 10) - 1]?.id) ? '' : '{red-fg}Número no válido (mira /siguientes){/}'); },
+    '/siguientes-limpiar': nextClear,
+    '/seguir': nextResume,
     '/especialistas': showSpecialists,
     '/cambios': showChanges,
     '/deshacer': doUndo,
@@ -787,7 +1086,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
 
   // ---------- Menú (lo pintan la web y la terminal) ----------
   const byGroup = (g) => actions.filter((x) => (x.custom ? 'TUYAS' : x.group || (x.main ? 'MODELO A MANO' : 'PROYECTO')) === g);
-  const actionItems = (g) => byGroup(g).map((a) => ({ id: a.cmd, label: a.label, desc: a.hint || '', stack: isStackable(a), run: () => toggleTray(a) }));
+  const actionItems = (g) => byGroup(g).map((a) => ({ id: a.cmd, label: a.label, desc: a.hint || '', info: actionInfo(a), stack: isStackable(a), run: () => toggleTray(a) }));
   const prof = () => PROFILES[session.profile];
 
   function menuDef() {
@@ -801,6 +1100,17 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
         { id: 'undo', label: 'Deshacer última', desc: 'Vuelve a como estaba antes de la última instrucción', run: doUndo },
         { id: 'redo', label: 'Rehacer', desc: 'Recupera lo que deshiciste', run: doRedo },
         { id: 'gitinit', label: 'Iniciar git aquí', desc: 'Necesario para las fotos y deshacer', run: doGitInit },
+      ],
+    });
+    g.push({
+      name: 'MCP', title: 'Plugins y MCP',
+      items: [
+        { id: 'mcp-blender', label: 'Conectar Blender (MCP)', desc: 'Instala el MCP de Blender en tu Claude', info: { what: 'Instala el servidor MCP de Blender (blender-mcp) en tu Claude para todos tus proyectos: Claude podrá crear y modificar objetos, materiales y escenas en un Blender abierto. Necesita «uv» instalado y el addon de Blender (te explico el paso al terminar). Permite sin preguntar las herramientas de ese MCP y abrir blender desde la consola en este proyecto.' }, run: () => mcpInstallPreset('blender') },
+        { id: 'mcp-godot', label: 'Conectar Godot (MCP)', desc: 'Instala el MCP de Godot en tu Claude', info: { what: 'Instala el servidor MCP de Godot (@coding-solo/godot-mcp) en tu Claude para todos tus proyectos: lanzar el editor, ejecutar proyectos, leer la salida de depuración y crear o editar escenas. Necesita Node.js y Godot instalado; si no lo encuentra, escribe /mcp-instalar godot y la ruta del ejecutable.' }, run: () => mcpInstallPreset('godot') },
+        { id: 'mcp-list', label: 'Ver MCP instalados', desc: 'Lista los servidores MCP de tu Claude', info: { what: 'Muestra los servidores MCP que tiene tu Claude y si están conectados.' }, run: mcpList },
+        { id: 'mcp-add', label: 'Añadir otro MCP…', desc: 'Cualquier servidor MCP por su comando', info: { what: 'Instala cualquier servidor MCP. Escribe /mcp-añadir nombre comando…, por ejemplo: /mcp-añadir docs npx -y @upstash/context7-mcp. Se instala para todos tus proyectos y solo se permite ese MCP.' }, run: () => { ui.setInput('/mcp-añadir '); focusInput(); } },
+        { id: 'plug-add', label: 'Instalar un plugin…', desc: 'Plugins de Claude Code por nombre@mercado', info: { what: 'Instala un plugin de Claude Code (skills, agentes, comandos). Escribe /plugin-instalar nombre@mercado. Si el mercado es nuevo, añádelo antes con /plugin-mercado usuario/repositorio. /plugin-lista muestra los que tienes.' }, run: () => { ui.setInput('/plugin-instalar '); focusInput(); } },
+        { id: 'admin', label: 'Reabrir como administrador', desc: 'Para acciones que piden permisos de Windows', info: { what: 'Reabre cla con permisos de administrador de Windows (te saldrá el aviso de confirmación). Úsalo solo si una acción falla por permisos, por ejemplo al controlar aplicaciones del sistema. Con administrador, Claude puede hacer más cosas en tu PC: úsalo solo cuando haga falta.' }, run: relaunchAdmin },
       ],
     });
     g.push({
@@ -820,6 +1130,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     g.push({
       name: 'COLA', title: 'Cola (modo noche)',
       items: [
+        { id: 'nextshow', label: `A continuación${nextQ.length ? ' (' + nextQ.length + ')' : ''}`, desc: 'Lo que escribes mientras trabajo se pone aquí y empieza solo', run: () => showNext('') },
         { id: 'qadd', label: 'Añadir a la cola', run: () => queueAdd('') },
         { id: 'qrun', label: `Ejecutar cola${queue.items.length ? ' (' + queue.items.length + ')' : ''}`, run: () => queueRun('') },
         { id: 'qshow', label: 'Ver cola', run: queueShow },
@@ -841,6 +1152,8 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
         { id: 'profile', label: `Perfil: ${prof().label}`, desc: prof().desc, run: cycleProfile },
         { id: 'perm', label: `Permisos: ${session.permission}`, run: cyclePerm },
         { id: 'autoflows', label: `Reconocer flujos: ${settings.autoFlows !== false ? 'sí' : 'no'}`, desc: 'Si escribes con tus palabras, usa los flujos que ya existen', run: () => toggleAutoFlows('') },
+        { id: 'guard', label: `Proteger archivos: ${settings.guard !== false ? 'sí' : 'no'}`, desc: 'Claude no sobrescribe archivos existentes sin tu permiso', info: { what: 'Un guardia revisa cada vez que Claude intenta reescribir ENTERO un archivo que ya existía (los archivos nuevos y los que él creó en la misma tarea pasan sin más). Si pasa, lo bloquea, te avisa con una notificación y eliges Permitir (vale solo para la tarea siguiente) o Denegar. Editar solo una parte con Edit no se bloquea.' }, run: () => SYSTEM['/proteger']('') },
+        { id: 'notify', label: `Avisos del sistema: ${settings.notify !== false ? 'sí' : 'no'}`, desc: 'Notificación de Windows cuando necesite algo de ti', info: { what: 'Te avisa con una notificación del sistema (en Windows, el aviso de siempre abajo a la derecha) cuando Claude necesita tu permiso, el plan espera tu OK, termina una tarea larga, falla algo o la cola se pausa, aunque estés en otra ventana. En la web, pulsa la campana para dar permiso al navegador.' }, run: () => SYSTEM['/avisos']('') },
         { id: 'planprev', label: `Plan previo: ${settings.planPreview !== false ? 'sí' : 'no'}`, desc: 'Lista con checks antes de ejecutar', run: () => togglePlanPreview('') },
         { id: 'verify', label: `Verificación: ${settings.verify}`, run: () => setVerify('') },
         { id: 'login', label: 'Login / estado', run: doLogin },
@@ -861,7 +1174,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       name: g.name,
       title: g.title,
       open: !settings.collapsed.includes(g.name),
-      items: g.items.map((i) => ({ id: i.id, label: i.label, desc: i.desc || '', primary: PRIMARY.has(i.id), stack: !!i.stack, inTray: !!i.stack && tray.includes(i.id) })),
+      items: g.items.map((i) => ({ id: i.id, label: i.label, desc: i.desc || '', info: i.info || (i.desc ? { what: i.desc } : null), primary: PRIMARY.has(i.id), stack: !!i.stack, inTray: !!i.stack && tray.includes(i.id) })),
     }));
   }
 
@@ -897,13 +1210,18 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       active: active ? { tier: active.tier, agent: active.agent || null } : null,
       pending: pending ? { label: pending.label || null, main: pending.main || null, queue: !!pending.queue } : null,
       queueRunning,
-      routing: thinking,
+      routing: thinking ? { start: thinkStart, now: Date.now() } : null,
+      next: nextQ.map((q) => ({ id: q.id, label: nextName(q), text: q.text.replace(/\s+/g, ' ').slice(0, 160), specs: q.specs.map((k) => SPECIALISTS[k]?.tag || k) })),
+      nextPaused: qPaused,
+      perm: permAsk ? { files: permAsk.files.map((f) => ({ path: f, rel: relOf(f) })) } : null,
+      guard: settings.guard !== false,
+      notify: settings.notify !== false,
       queueLen: queue.items.length,
       tray: trayActions().map((a) => ({ id: a.cmd, label: a.label, needsText: needsText(a) })),
       autoFlows: settings.autoFlows !== false,
       run: session.busy && runMeta ? { start: runMeta.start, now: Date.now(), label: runMeta.label || null, steps: runMeta.steps, done: runMeta.done, delegations: runMeta.delegations, expectedMs: runMeta.est ? runMeta.est.ms : null, basis: runMeta.est ? runMeta.est.basis : null, basisN: runMeta.est ? runMeta.est.n : 0 } : null,
       planPreview: settings.planPreview !== false,
-      plan: planState ? { note: planState.note || '', text: planState.text || '', items: planItems(planState.plan) } : null,
+      plan: planState ? { queued: session.busy || queueRunning || nextQ.length > 0, note: planState.note || '', text: planState.text || '', items: planItems(planState.plan) } : null,
       tiers: TIERS.map((t) => ({ tier: t, msgs: st.tiers[t].msgs, inp: st.tiers[t].inp, out: st.tiers[t].out, share: st.tiers[t].out / total })),
       cost: st.cost,
       cacheRatio: st.cacheRatio,
@@ -956,6 +1274,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
         const q = afterIdle.splice(0);
         setImmediate(() => q.forEach((fn) => fn()));
       }
+      setTimeout(drainNext, 80);
     }
     refresh();
   });
@@ -993,7 +1312,8 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     if (ui.step) return ui.step({ id: id || 'd' + Date.now(), kind: 'agent', tier: expectedTier, agent: agentType, name: agentType, detail: description, full, start: Date.now() });
     log(`  {${COLOR[expectedTier]}-fg}↳ delegando en {bold}${esc(agentType)}{/bold} (${expectedTier}){/}${description ? ' {gray-fg}' + esc(description) + '{/}' : ''}`);
   });
-  session.on('tool-end', ({ id, error }) => {
+  session.on('tool-end', ({ id, error, text }) => {
+    if (error) adminHint(text);
     const st = stepInfo.get(id);
     if (!st) return;
     stepInfo.delete(id);
@@ -1025,9 +1345,15 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     if (session.sessionId) setProject(cwd, { sessionId: session.sessionId, ts: Date.now() });
     if (currentLabel === CONTEXT_LABEL && !r.isError) {
       rescanDocs();
-      log(`{green-fg}📄 Contexto ${digestState(cwd, docs).fresh ? 'guardado' : 'revisado'} en ${esc(CONTEXT_REL)}.{/} {gray-fg}Las próximas sesiones lo cargan solas (Instalar reglas añade el import a CLAUDE.md).{/}`);
+      log(`{green-fg}📄 Contexto ${digestState(cwd, docs).fresh ? 'guardado' : 'revisado'} en ${esc(contextRel(cwd))}.{/} {gray-fg}Las próximas sesiones lo cargan solas (Instalar reglas añade el import a CLAUDE.md).{/}`);
     }
-    if (!r.isError) checkDrift(r.text);
+    if (r.asks && r.asks.length) askOverwrite(r.asks);
+    notify(r.isError ? 'fail' : 'done', r.isError ? 'La tarea falló' : 'Tarea terminada', `${currentLabel || 'Instrucción'}${r.ms ? ' · ' + fmtDur(r.ms) : ''}`, r.ms);
+    if (!r.isError) { checkDrift(r.text); qPaused = false; } else if (nextQ.length) { qPaused = true; log('{yellow-fg}⏸ La tarea terminó con error: la cola «a continuación» queda en pausa (/seguir para continuar).{/}'); }
+    if (!r.bigContext && session.lastCtx >= settings.compactAt * 0.8 && !ctxWarned) {
+      ctxWarned = true;
+      log(`{yellow-fg}🗜 El contexto va por el ${Math.round(session.lastCtx / settings.compactAt * 100)}% (${kfmt(session.lastCtx)} de ${kfmt(settings.compactAt)}).${settings.autoCompact ? ' Compactaré solo al pasar del límite.' : ' Con /compactar lo resumo cuando quieras.'}{/}`);
+    }
     if (r.bigContext) {
       if (settings.autoCompact) { if (!afterIdle.length) afterIdle.push(() => doCompact(`contexto > ${kfmt(settings.compactAt)}`)); }
       else log('{yellow-fg}El contexto ya es grande: /compactar (o "Nueva sesión") te ahorra tokens.{/}');
@@ -1035,9 +1361,14 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     if (repo && run && (run.mainEdits + run.subEdits) > 0) log('{gray-fg}   /cambios para ver qué tocó · /deshacer para volver atrás{/}');
     refresh();
   });
-  session.on('cancelled', () => log('{yellow-fg}Tarea cancelada.{/}'));
+  session.on('cancelled', () => {
+    log('{yellow-fg}Tarea cancelada.{/}');
+    if (nextQ.length) { qPaused = true; notify('queue', 'Cola en pausa', 'Pulsa Seguir para continuar con lo siguiente.'); log('{yellow-fg}⏸ La cola «a continuación» queda en pausa. Pulsa «Seguir» (o /seguir) cuando quieras, o vacíala.{/}'); }
+  });
   session.on('failure', (msg) => {
     log(`{red-fg}${esc(msg)}{/}`);
+    if (nextQ.length) { qPaused = true; notify('queue', 'Cola en pausa', 'Falló la tarea; la cola espera.'); }
+    notify('fail', 'Algo falló', msg);
     if (/auth|login|credential|unauthor|sign in/i.test(msg)) log('{yellow-fg}Parece un problema de sesión: pulsa "Login / estado".{/}');
     if (/unknown option|unknown argument|unrecognized/i.test(msg)) log('{yellow-fg}Tu versión de Claude Code no conoce un flag: ejecuta `claude update` y reintenta.{/}');
   });
@@ -1087,7 +1418,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   }
 
   return {
-    handle, menu, press, snapshot, boot, planToggle: planToggleId, planRun, planCancel, cancelPending, setCollapsed, quit, removeFromTray, clearTray,
+    handle, menu, press, snapshot, boot, planToggle: planToggleId, planRun, planCancel, permAllow, permDeny, skipRouting, nextRemove, nextUp, nextClear, nextResume, cancelPending, setCollapsed, quit, removeFromTray, clearTray,
     cancel: () => SYSTEM['/cancelar'](),
     cwd, session, settings,
     get queueRunning() { return queueRunning; },

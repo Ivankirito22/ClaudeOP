@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { reminder } from './rules.mjs';
+import { fileURLToPath } from 'node:url';
+const GUARD_JS = fileURLToPath(new URL('./guard.mjs', import.meta.url));
 import { checkpoint } from './git.mjs';
 import { docsIndex, digestState, firstRunPrefix, contextFiles, readable } from './docs.mjs';
 
@@ -302,6 +304,10 @@ export class Session extends EventEmitter {
     this.version = getVersion();
     this.tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-router-'));
     TMP_DIRS.add(this.tmp);
+    this.guardDir = path.join(this.tmp, 'guard');
+    fs.mkdirSync(this.guardDir, { recursive: true });
+    this._approvedFresh = false;
+    this._clearApproved = false;
     this.costBase = 0;
     this.resetStats();
   }
@@ -359,6 +365,31 @@ export class Session extends EventEmitter {
       docs: this.settings.contextDocs !== false ? docsIndex(this.docs) : '',
     }));
     fs.writeFileSync(this.subStyleFile, SUBAGENT_STYLE);
+    // Guardia: hook PreToolUse que impide sobrescribir con Write archivos que ya existían (barras / para que valga en cmd y en bash)
+    this.guardSettingsFile = path.join(this.tmp, 'guard-settings.json');
+    const fwd = (x) => String(x).replace(/\\/g, '/');
+    fs.writeFileSync(this.guardSettingsFile, JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: `"${fwd(process.execPath)}" "${fwd(GUARD_JS)}"` }] }] } }));
+  }
+
+  // Archivos que el guardia bloqueó en esta tarea (para preguntarte)
+  takeAsks() {
+    const f = path.join(this.guardDir, 'asks.jsonl');
+    let out = [];
+    try {
+      const seen = new Set();
+      for (const l of fs.readFileSync(f, 'utf8').split('\n')) {
+        if (!l.trim()) continue;
+        try { const o = JSON.parse(l); if (!seen.has(o.path)) { seen.add(o.path); out.push(o.path); } } catch { /* línea rota */ }
+      }
+      fs.rmSync(f, { force: true });
+    } catch { out = []; }
+    return out;
+  }
+
+  // Tú dijiste «Permitir»: esos archivos se pueden reescribir en la siguiente tarea (y solo en esa)
+  approveFiles(paths) {
+    try { fs.writeFileSync(path.join(this.guardDir, 'allow.json'), JSON.stringify(paths)); } catch { /* nada */ }
+    this._approvedFresh = true;
   }
 
   buildArgs(mainTier) {
@@ -378,6 +409,7 @@ export class Session extends EventEmitter {
     if (this.supports([2, 1, 281])) args.push('--exclude-dynamic-system-prompt-sections'); // mejor reutilización de caché
     args.push('--allowedTools', this.allowList.join(','));
     if (this.settings.blockPush !== false) args.push('--disallowedTools', DEFAULT_DENY.join(','));
+    if (this.settings.guard !== false && this.guardSettingsFile) args.push('--settings', this.guardSettingsFile);
     if (this.settings.maxBudget) args.push('--max-budget-usd', String(this.settings.maxBudget));
     if (this.sessionId) args.push('--resume', this.sessionId);
     return args;
@@ -438,7 +470,10 @@ export class Session extends EventEmitter {
       if (this.silent) return;
       const c = ev.message?.content;
       for (const b of Array.isArray(c) ? c : []) {
-        if (b && b.type === 'tool_result' && b.tool_use_id) this.emit('tool-end', { id: b.tool_use_id, error: !!b.is_error });
+        if (b && b.type === 'tool_result' && b.tool_use_id) {
+          const txt = b.is_error ? (typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((x) => x?.text || '').join(' ') : '') : '';
+          this.emit('tool-end', { id: b.tool_use_id, error: !!b.is_error, text: txt.slice(0, 400) });
+        }
       }
       return;
     }
@@ -483,6 +518,7 @@ export class Session extends EventEmitter {
           cost: this.totalCost,
           run: this.lastRun,
           bigContext: this.lastCtx > this.settings.compactAt,
+          asks: this.takeAsks(),
         });
       }
       this.emit('stats', this.stats);
@@ -504,7 +540,7 @@ export class Session extends EventEmitter {
       let child;
       try {
         const c = claudeCmd(args);
-        child = spawn(c.file, c.args, { cwd: this.cwd, shell: c.shell, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+        child = spawn(c.file, c.args, { cwd: this.cwd, shell: c.shell, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, CR_GUARD_DIR: this.guardDir } });
       } catch (e) {
         return finish({ code: -1, error: e.message });
       }
@@ -559,6 +595,10 @@ export class Session extends EventEmitter {
   async run(prompt, opts = {}) {
     this._begin();
     try {
+      // cada tarea empieza con la lista de «archivos creados en esta tarea» vacía; la aprobación vale solo para la tarea siguiente
+      try { fs.rmSync(path.join(this.guardDir, 'created.json'), { force: true }); fs.rmSync(path.join(this.guardDir, 'asks.jsonl'), { force: true }); } catch { /* nada */ }
+      this._clearApproved = this._approvedFresh;
+      this._approvedFresh = false;
       const prof = PROFILES[this.profile] || PROFILES.balanced;
       this.activeSpecialists = (opts.specialists || []).filter((k) => SPECIALISTS[k]).slice(0, 4);
       let main = opts.main || prof.main;
@@ -598,6 +638,7 @@ export class Session extends EventEmitter {
       this.lastRun.label = opts.label || null;
     } finally {
       this.runStats = null;
+      if (this._clearApproved) { try { fs.rmSync(path.join(this.guardDir, 'allow.json'), { force: true }); } catch { /* nada */ } this._clearApproved = false; }
       this._end();
     }
   }
@@ -634,19 +675,51 @@ export class Session extends EventEmitter {
   }
 
   // Pregunta corta a Haiku, sin herramientas y sin tocar la sesión (para el enrutador). Devuelve el texto o null.
-  classify(prompt, timeoutMs = 20000) {
+  // Va rápido: sin servidores MCP, sin skills, sin guardar sesión y con un prompt de sistema mínimo. Si tu versión de Claude Code
+  // no conoce alguno de esos flags, se reintenta con los básicos y se acuerda para la próxima.
+  async classify(prompt, timeoutMs = 15000) {
+    this.classifySkipped = false;
+    const key = prompt;
+    if (this.classifyCache?.has(key)) return this.classifyCache.get(key);
+    const base = ['-p', '--model', MODELS.haiku, '--output-format', 'stream-json', '--verbose', '--tools', ''];
+    const fast = [...base, '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--system-prompt', 'You are a precise JSON-only classifier. Reply with the JSON and nothing else.'];
+    let r;
+    if (this.fastClassify !== false) {
+      r = await this._classifyOnce(fast, prompt, timeoutMs);
+      if (r.result === null && !this.classifySkipped && /unknown (option|argument)|unrecognized|invalid (option|flag)|did you mean/i.test(r.stderr)) {
+        this.fastClassify = false; // esta versión no los conoce: a partir de ahora, los básicos
+        r = await this._classifyOnce(base, prompt, timeoutMs);
+      }
+    } else r = await this._classifyOnce(base, prompt, timeoutMs);
+    if (r.result !== null) {
+      this.classifyCache = this.classifyCache || new Map();
+      this.classifyCache.set(key, r.result);
+      if (this.classifyCache.size > 30) this.classifyCache.delete(this.classifyCache.keys().next().value);
+    }
+    return r.result;
+  }
+
+  // Para el botón «saltar»: corta la consulta a Haiku y se sigue con palabras clave
+  skipClassify() {
+    if (!this.classifyChild) return false;
+    this.classifySkipped = true;
+    try { this.classifyChild.kill(); } catch { /* ya terminó */ }
+    return true;
+  }
+
+  _classifyOnce(args, prompt, timeoutMs) {
     return new Promise((resolve) => {
       let child;
-      let out = '';
       let buf = '';
+      let stderr = '';
       let result = null;
       let settled = false;
-      const done = (v) => {
+      const done = () => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         this.classifyChild = null;
-        resolve(v);
+        resolve({ result, stderr });
       };
       const feed = (line) => {
         try {
@@ -655,19 +728,19 @@ export class Session extends EventEmitter {
         } catch { /* no JSON */ }
       };
       try {
-        const c = claudeCmd(['-p', '--model', MODELS.haiku, '--output-format', 'stream-json', '--verbose', '--tools', '']);
+        const c = claudeCmd(args);
         child = spawn(c.file, c.args, { cwd: os.tmpdir(), shell: c.shell, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
-      } catch { return done(null); }
+      } catch { return done(); }
       this.classifyChild = child;
-      const timer = setTimeout(() => { try { child.kill(); } catch { /* ya terminó */ } done(null); }, timeoutMs);
+      const timer = setTimeout(() => { try { child.kill(); } catch { /* ya terminó */ } done(); }, timeoutMs);
       child.stdout.on('data', (d) => {
         buf += d.toString();
         let i;
-        while ((i = buf.indexOf('\n')) >= 0) { out = buf.slice(0, i).trim(); if (out) feed(out); buf = buf.slice(i + 1); }
+        while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); if (l) feed(l); buf = buf.slice(i + 1); }
       });
-      child.on('error', () => done(null));
-      child.on('close', () => { if (buf.trim()) feed(buf.trim()); done(result); });
-      child.stderr.on('data', () => {});
+      child.on('error', () => done());
+      child.on('close', () => { if (buf.trim()) feed(buf.trim()); done(); });
+      child.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
       child.stdin.on('error', () => {});
       child.stdin.end(prompt);
     });

@@ -17,6 +17,8 @@ export const DEFAULTS = {
   remindEvery: 5, // cada cuántas instrucciones se antepone solo un recordatorio de reglas (0 = nunca)
   verify: 'auto', // verificación final: auto | siempre | nunca
   lessons: true, // Claude apunta lecciones en .claude/lecciones.md
+  guard: true, // el guardia impide sobrescribir archivos que ya existían (pide permiso)
+  notify: true, // avisos del sistema (Windows) cuando necesita algo de ti o termina
   planPreview: true, // antes de ejecutar, lista con checks de lo que se va a hacer
   autoFlows: true, // reconoce en lo que escribes los flujos que ya existen y los aplica solo
   contextDocs: true, // lee/indexa los MDs del proyecto para entrar en contexto

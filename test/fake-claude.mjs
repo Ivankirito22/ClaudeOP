@@ -1,19 +1,34 @@
 #!/usr/bin/env node
 // Imita a `claude` para probar el router sin gastar nada ni necesitar login.
+import fs from 'node:fs';
 const a = process.argv.slice(2);
 if (a.includes('--version')) { console.log('2.1.302 (Claude Code)'); process.exit(0); }
+if (a[0] === 'mcp' || a[0] === 'plugin') {
+  if (process.env.FAKE_MCP_LOG) fs.appendFileSync(process.env.FAKE_MCP_LOG, JSON.stringify(a) + '\n');
+  if (process.env.FAKE_MCP_FAIL) { console.error('error: no se pudo'); process.exit(1); }
+  if (a[1] === 'list') console.log('blender: uvx blender-mcp - ✓ Connected');
+  else console.log('OK ' + a.join(' '));
+  process.exit(0);
+}
 if (a[0] === 'auth' && a[1] === 'status') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' })); process.exit(0); }
 
 let input = '';
 process.stdin.on('data', (d) => (input += d));
 process.stdin.on('end', () => setTimeout(run, Number(process.env.FAKE_SLOW || 0) * 1000));
-function run() {
+async function run() {
   const out = (o) => console.log(JSON.stringify({ session_id: 'sess-1', ...o }));
   out({ type: 'system', subtype: 'init', model: 'claude-sonnet-5-5' });
 
   // Enrutador (Haiku): devuelve JSON con el tipo de petición y los flujos que encajan (tolera faltas)
   if (input.includes('enrutador de un asistente')) {
+    if (process.env.FAKE_ROUTER_LOG) { try { fs.appendFileSync(process.env.FAKE_ROUTER_LOG, JSON.stringify(a) + '\n'); } catch { /* nada */ } }
+    if (process.env.FAKE_NO_FAST && a.includes('--strict-mcp-config')) { console.error("error: unknown option '--strict-mcp-config'"); process.exit(1); }
     if (process.env.FAKE_ROUTER_FAIL) process.exit(1);
+    if (Number(process.env.FAKE_ROUTER_MS || 0)) { setTimeout(routerAnswer, Number(process.env.FAKE_ROUTER_MS)); return; }
+    routerAnswer();
+    return;
+  }
+  function routerAnswer() {
     const req = (input.split('<<<')[1] || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const flows = [];
     if (/optimi[zs]/.test(req)) flows.push('/optimizar');
@@ -29,7 +44,6 @@ function run() {
     const txt = JSON.stringify({ kind, flows, tech });
     out({ type: 'assistant', message: { id: 'r1', model: 'claude-haiku-5-5', content: [{ type: 'text', text: txt }], usage: { input_tokens: 300, output_tokens: 20 } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: txt, total_cost_usd: 0.0005, num_turns: 1, duration_ms: 300 });
-    return;
   }
 
   // Modo resumen (compactación): sin herramientas
@@ -43,6 +57,19 @@ function run() {
   // Modos de prueba: FALLA => resultado con error; SOLOEDIT => el principal edita 5 veces sin delegar
   if (input.includes('FALLA')) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'boom', total_cost_usd: 0.002, num_turns: 1, duration_ms: 100 });
+    return;
+  }
+  // SOBREESCRIBE <ruta>: el principal intenta un Write; pasa por el guardia de verdad (src/guard.mjs)
+  const ow = /SOBREESCRIBE (\S+)/.exec(input) || /reescribir entero (\S+?) y se bloque/.exec(input);
+  if (ow) {
+    const { decide } = await import('../src/guard.mjs');
+    const r = process.env.CR_GUARD_DIR && a.includes('--settings') ? decide({ tool_name: 'Write', cwd: process.cwd(), tool_input: { file_path: ow[1] } }, process.env.CR_GUARD_DIR) : { allow: true };
+    if (r.allow) fs.writeFileSync(ow[1], 'reescrito por Claude\n');
+    out({ type: 'assistant', message: { id: 'w1', model: 'claude-sonnet-5-5', content: [{ type: 'tool_use', id: 'wr1', name: 'Write', input: { file_path: ow[1] } }], usage: { input_tokens: 50, output_tokens: 10 } } });
+    out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'wr1', is_error: !r.allow, content: r.allow ? 'ok' : r.reason }] } });
+    const txt = r.allow ? 'Frivan, reescrito' : 'Frivan, no pude: me lo bloquearon';
+    out({ type: 'assistant', message: { id: 'w2', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: txt }], usage: { input_tokens: 10, output_tokens: 5 } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: txt, total_cost_usd: 0.01, num_turns: 2, duration_ms: 300 });
     return;
   }
   if (input.includes('SOLOEDIT')) {
