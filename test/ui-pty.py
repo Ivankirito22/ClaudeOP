@@ -7,7 +7,7 @@ W,H=150,42
 proj=tempfile.mkdtemp(prefix='projY-'); stf=tempfile.mktemp(suffix='.json'); hf=tempfile.mktemp(suffix='.jsonl')
 os.makedirs(os.path.join(proj,'docs')); open(os.path.join(proj,'README.md'),'w').write('# Mi Juego\nroguelike\n'); open(os.path.join(proj,'docs','guia.md'),'w').write('# Guia de niveles\n')
 json.dump({'settings': {'planPreview': False}, 'projects': {}}, open(stf, 'w'))  # el plan previo se prueba en smoke.mjs y web.py
-env=dict(os.environ, TERM='xterm-256color', CR_CLAUDE_BIN="node " + os.path.join(ROOT, "test", "fake-claude.mjs"), CR_STATE_FILE=stf, CR_HISTORY_FILE=hf, HOME=tempfile.mkdtemp(prefix='home-'), CR_NO_UPDATE_CHECK='1')
+env=dict(os.environ, TERM='xterm-256color', CR_CLAUDE_BIN="node " + os.path.join(ROOT, "test", "fake-claude.mjs"), CR_STATE_FILE=stf, CR_HISTORY_FILE=hf, HOME=tempfile.mkdtemp(prefix='home-'), CR_NO_UPDATE_CHECK='1', FAKE_STEP_MS='700')
 pid,fd=pty.fork()
 if pid==0:
     os.chdir(ROOT); os.execvpe('node',['node','bin/cla.mjs','--terminal',proj],env)
@@ -24,7 +24,13 @@ def pump(t):
             except OSError: return
             out+=d; stream.feed(d)
 strip=lambda b: re.sub(rb'\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b[()][A-Z0-9]|\x1b[=>]|\x1b[78]', b'', b).decode('utf8','replace')
-def lines(): return screen.display
+_last=[]
+def lines():
+    # pyte a veces falla al pintar caracteres anchos (emoji) en el borde de la pantalla: usamos la última pantalla buena
+    global _last
+    try: _last=screen.display
+    except IndexError: pass
+    return _last
 def find(txt):
     for y,l in enumerate(lines()):
         x=l.find(txt)
@@ -127,6 +133,10 @@ check('clic Rehacer lo recupera', os.path.exists(os.path.join(proj,'nuevo.txt'))
 # teclado vivo tras clics
 typ('/stack')
 check('tras varios clics se sigue pudiendo escribir', waitfor('Especialistas del proyecto'))
+typ('!tarea de prueba para ver el cronómetro')
+check('la cabecera muestra el cronómetro y las acciones hechas', waitfor('⏱', timeout=8))
+check('...y la tarea termina', waitfor('terminado', timeout=10))
+pump(1.0)
 
 # cola
 typ('/cola primera tarea'); typ('/cola /limpiar')

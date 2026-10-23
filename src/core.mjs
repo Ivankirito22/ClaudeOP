@@ -249,6 +249,18 @@ export const COMPACT_PROMPT =
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
+// Texto completo de una acción (para el detalle desplegable de la interfaz)
+function fullOf(name, input = {}) {
+  const cut = (x, n = 1600) => { x = String(x ?? ''); return x.length > n ? x.slice(0, n) + '…' : x; };
+  if (name === 'Bash') return cut(input.command);
+  if (name === 'Agent' || name === 'Task') return cut([input.description, input.prompt].filter(Boolean).join('\n\n'));
+  if (input.file_path) return cut(input.file_path + (input.old_string ? '\n− ' + cut(input.old_string, 300) + '\n+ ' + cut(input.new_string, 300) : ''));
+  if (input.pattern) return cut(input.pattern + (input.path ? '  en  ' + input.path : ''));
+  if (input.query) return cut(input.query);
+  if (input.url) return cut(input.url);
+  try { return cut(JSON.stringify(input), 600); } catch { return ''; }
+}
+
 function summarize(name, input = {}) {
   if (name === 'Bash') return String(input.command || '').slice(0, 90);
   if (input.file_path) return String(input.file_path);
@@ -410,14 +422,24 @@ export class Session extends EventEmitter {
             if (b.name === 'Agent' || b.name === 'Task') {
               const info = { agentType: b.input?.subagent_type || 'agente', description: b.input?.description || '' };
               this.agentByToolId.set(b.id, info);
-              this.emit('delegate', { ...info, expectedTier: tierOf(this.agents[info.agentType]?.model), from: agent });
+              this.emit('delegate', { ...info, id: b.id, full: fullOf(b.name, b.input), expectedTier: tierOf(this.agents[info.agentType]?.model), from: agent });
             } else {
-              this.emit('tool', { tier, agent, name: b.name, detail: summarize(b.name, b.input) });
+              this.emit('tool', { id: b.id, tier, agent, name: b.name, detail: summarize(b.name, b.input), full: fullOf(b.name, b.input) });
             }
           }
         }
       }
       this.emit('stats', this.stats);
+      return;
+    }
+
+    // Resultado de una herramienta o de un subagente: así se sabe cuándo termina cada paso
+    if (ev.type === 'user') {
+      if (this.silent) return;
+      const c = ev.message?.content;
+      for (const b of Array.isArray(c) ? c : []) {
+        if (b && b.type === 'tool_result' && b.tool_use_id) this.emit('tool-end', { id: b.tool_use_id, error: !!b.is_error });
+      }
       return;
     }
 

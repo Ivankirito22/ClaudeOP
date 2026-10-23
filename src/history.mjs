@@ -43,6 +43,18 @@ export function typicalCost(label, { min = 2, last = 6 } = {}) {
   return { cost: xs.reduce((a, e) => a + e.cost, 0) / xs.length, n: xs.length };
 }
 
+// Tiempo aproximado de una instrucción: mediana de las últimas veces que se hizo lo mismo (o de las últimas parecidas si es nueva).
+// Devuelve { ms, n, basis: 'similares'|'general' } o null si aún no hay datos.
+export function estimateMs(label, { last = 6 } = {}) {
+  const all = load({ days: 90 }).filter((e) => !e.error && e.ms > 0);
+  const med = (xs) => { const v = xs.map((e) => e.ms).sort((a, b) => a - b); return v[Math.floor((v.length - 1) / 2)] ?? 0; };
+  const same = all.filter((e) => (e.label || null) === (label || null)).slice(-last);
+  if (same.length >= 1) return { ms: med(same), n: same.length, basis: 'similares' };
+  const gen = all.filter((e) => e.ms > 15000).slice(-10);
+  if (gen.length >= 3) return { ms: med(gen), n: gen.length, basis: 'general' };
+  return null;
+}
+
 export function summarize(entries) {
   const t = { runs: entries.length, cost: 0, out: { haiku: 0, sonnet: 0, opus: 0 }, delegSum: 0, delegN: 0, ms: 0, errors: 0, byProject: {}, byLabel: {} };
   for (const e of entries) {

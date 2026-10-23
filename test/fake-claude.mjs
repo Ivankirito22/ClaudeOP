@@ -59,29 +59,41 @@ function run() {
     return;
   }
 
-  out({
-    type: 'assistant',
-    message: {
-      id: 'm1', model: 'claude-sonnet-5-5',
-      content: [
-        { type: 'text', text: 'Voy a delegar. args: ' + a.join(' ') + ' || input: ' + input.slice(0, process.env.FAKE_ECHO ? 9000 : 400) },
-        { type: 'tool_use', id: 'tu1', name: 'Agent', input: { subagent_type: 'limpiador', description: 'Quitar código muerto', prompt: 'x' } },
-      ],
-      usage: { input_tokens: 100, output_tokens: 20 },
-    },
-  });
-  out({
-    type: 'assistant', parent_tool_use_id: 'tu1',
-    message: { id: 'm2', model: 'claude-haiku-5-5', content: [{ type: 'tool_use', id: 'tu2', name: 'Edit', input: { file_path: 'a.js' } }], usage: { input_tokens: 50, output_tokens: 10 } },
-  });
-  out({
-    type: 'assistant', parent_tool_use_id: 'tu1',
-    message: { id: 'm3', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'hecho' }], usage: { input_tokens: 60, output_tokens: 5 } },
-  });
-  const final = (input.includes('SINNOMBRE') ? 'Listo, sin nombre. ' : 'Frivan, listo. ') + input.slice(0, 40).replace(/\n/g, ' ');
-  out({
-    type: 'assistant',
-    message: { id: 'm4', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: final }], usage: { input_tokens: 20, cache_read_input_tokens: 100, output_tokens: 15 } },
-  });
-  out({ type: 'result', subtype: 'success', is_error: false, result: final, total_cost_usd: 0.0123, num_turns: 3, duration_ms: 1500 });
+  runDefault();
+  async function runDefault() {
+    const t0 = Date.now();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const gap = Number(process.env.FAKE_STEP_MS || 0);
+    out({
+      type: 'assistant',
+      message: {
+        id: 'm1', model: 'claude-sonnet-5-5',
+        content: [
+          { type: 'text', text: 'Voy a delegar. args: ' + a.join(' ') + ' || input: ' + input.slice(0, process.env.FAKE_ECHO ? 9000 : 400) },
+          { type: 'tool_use', id: 'tb1', name: 'Bash', input: { command: 'npm test -- --reporter=dot' } },
+          { type: 'tool_use', id: 'tu1', name: 'Agent', input: { subagent_type: 'limpiador', description: 'Quitar código muerto', prompt: 'Borra los imports sin usar de a.js' } },
+        ],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      },
+    });
+    await sleep(gap);
+    out({
+      type: 'assistant', parent_tool_use_id: 'tu1',
+      message: { id: 'm2', model: 'claude-haiku-5-5', content: [{ type: 'tool_use', id: 'tu2', name: 'Edit', input: { file_path: 'a.js' } }], usage: { input_tokens: 50, output_tokens: 10 } },
+    });
+    out({ type: 'user', parent_tool_use_id: 'tu1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'ok' }] } });
+    out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tb1', content: 'tests ok' }] } });
+    out({
+      type: 'assistant', parent_tool_use_id: 'tu1',
+      message: { id: 'm3', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'hecho' }], usage: { input_tokens: 60, output_tokens: 5 } },
+    });
+    await sleep(gap);
+    out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'hecho' }] } });
+    const final = (input.includes('SINNOMBRE') ? 'Listo, sin nombre. ' : 'Frivan, listo. ') + input.slice(0, 40).replace(/\n/g, ' ');
+    out({
+      type: 'assistant',
+      message: { id: 'm4', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: final }], usage: { input_tokens: 20, cache_read_input_tokens: 100, output_tokens: 15 } },
+    });
+    out({ type: 'result', subtype: 'success', is_error: false, result: final, total_cost_usd: 0.0123, num_turns: 3, duration_ms: Date.now() - t0 });
+  }
 }

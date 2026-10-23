@@ -15,8 +15,10 @@ tmp = tempfile.mkdtemp()
 proj = os.path.join(tmp, 'juego'); os.makedirs(proj)
 open(os.path.join(proj, 'README.md'), 'w').write('# Juego\nUn juego.\n')
 json.dump({'settings': {'planPreview': False}, 'projects': {}}, open(os.path.join(tmp, 'state.json'), 'w'))  # los tests de siempre van sin plan previo; el plan se prueba aparte
+json_hist = os.path.join(tmp, 'hist.jsonl')
+open(json_hist, 'w').write(json.dumps({'ts': int(time.time() * 1000), 'cwd': proj, 'label': 'Pulir lo último', 'ms': 30000, 'cost': 0.01, 'out': {'haiku': 1, 'sonnet': 1, 'opus': 0}}) + '\n')  # historial previo: así hay tiempo aproximado
 env = dict(os.environ, CR_CLAUDE_BIN=f'node {ROOT}/test/fake-claude.mjs', CR_STATE_FILE=os.path.join(tmp, 'state.json'),
-           CR_HISTORY_FILE=os.path.join(tmp, 'hist.jsonl'), CR_NO_UPDATE_CHECK='1', CR_IDLE_MS='6000', FAKE_ECHO='1')
+           CR_HISTORY_FILE=os.path.join(tmp, 'hist.jsonl'), CR_NO_UPDATE_CHECK='1', CR_IDLE_MS='6000', FAKE_ECHO='1', FAKE_STEP_MS='500')
 p = subprocess.Popen(['node', f'{ROOT}/bin/cla.mjs', '--no-open'], cwd=proj, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 url = None
 t0 = time.time()
@@ -95,6 +97,12 @@ with sync_playwright() as pw:
     check('el botón Enviar cuenta lo acumulado', 'Enviar (2)' in pg.locator('#send').inner_text())
     if SHOTS: pg.screenshot(path=f'{SHOTS}/2a-bandeja.png')
     pg.fill('#inp', 'un menú de pausa'); pg.click('#send')
+    check('mientras trabaja aparece el cronómetro de la tarea', poll(lambda: pg.locator('#runbar.show').count() == 1 and '⏱' in pg.locator('#runbar').inner_text(), 6))
+    check('sin historial no inventa un tiempo: dice que aprende', poll(lambda: 'sin datos para estimar' in pg.locator('#runbar').inner_text(), 3))
+    if SHOTS: pg.screenshot(path=f'{SHOTS}/5-cronometro.png')
+    check('el chip de arriba muestra el tiempo corriendo', poll(lambda: re.search(r'\d+:\d\d', pg.locator('#live').inner_text()) is not None, 4))
+    check('el título de la pestaña lleva el cronómetro', '⏱' in pg.title())
+    check('aparece un grupo de pasos «Ejecutando…» con spinner', poll(lambda: pg.locator('.sg.run').count() == 1 and re.search('Ejecutando|Delegando', pg.locator('.sg.run .sgh').inner_text()) is not None, 4))
     check('termina la instrucción', poll(lambda: 'terminado' in pg.locator('#chat').inner_text()))
     txt = pg.locator('#chat').inner_text()
     user = pg.locator('.e.user').first.inner_text()
@@ -105,7 +113,26 @@ with sync_playwright() as pw:
     check('los chips del estado cuentan algo', '$' in pg.locator('#stats').inner_text())
     check('las líneas de herramientas están ocultas por defecto', all(not e.is_visible() for e in pg.locator('.e.tool').all()))
     pg.click('#toolsToggle')
-    check('el botón «detalle» las muestra', pg.locator('.e.tool').count() == 0 or any(e.is_visible() for e in pg.locator('.e.tool').all()))
+    check('el botón «detalle» abre todos los grupos de pasos', pg.locator('.sgb').count() >= 1 and all(e.is_visible() for e in pg.locator('.sgb').all()))
+    pg.click('#toolsToggle')
+    check('el cronómetro desaparece al terminar', poll(lambda: pg.locator('#runbar.show').count() == 0, 4))
+    g = pg.locator('.sg').first
+    check('al terminar el grupo resume «N acciones · M subagente»', re.search(r'\d+ acciones? · 1 subagente', g.locator('.sgh').inner_text()) is not None and g.locator('.sgh .ic').inner_text() == '✓')
+    check('el grupo empieza plegado (limpio)', not g.locator('.sgb').is_visible())
+    g.locator('.sgh').click()
+    check('un clic en la flecha lo despliega', g.locator('.sgb').is_visible())
+    rows = g.locator('.st')
+    check('lista cada paso: Bash, el subagente y su Edit', rows.count() == 3 and 'Bash' in rows.nth(0).inner_text() and 'limpiador' in g.inner_text() and 'Edit' in g.inner_text())
+    check('cada paso trae su instrucción y su modelo', 'npm test' in rows.nth(0).inner_text() and 'Quitar código muerto' in g.inner_text() and 'haiku' in g.inner_text())
+    check('cada paso trae su tiempo', all(re.search(r'(<1 s|\d+ s|\d+ min)', rows.nth(i).locator('.tm').inner_text()) for i in range(3)))
+    check('el detalle está oculto hasta que lo abres', not rows.nth(1).locator('.stb').is_visible())
+    rows.nth(1).locator('.sth').click()
+    check('clic en un paso muestra la instrucción completa', 'Borra los imports sin usar' in rows.nth(1).locator('.stb').inner_text() and rows.nth(1).locator('.stb').is_visible())
+    rows.nth(0).locator('.sth').click()
+    check('...y el comando completo de Bash', 'npm test -- --reporter=dot' in rows.nth(0).locator('.stb').inner_text())
+    if SHOTS: pg.screenshot(path=f'{SHOTS}/6-pasos.png')
+    g.locator('.sgh').click()
+    check('otro clic lo pliega', not g.locator('.sgb').is_visible())
     check('la entrada se vacía y vuelve el botón Enviar', pg.locator('#send').inner_text() == 'Enviar')
     if SHOTS: pg.screenshot(path=f'{SHOTS}/2-tras-tarea.png')
 
@@ -113,6 +140,10 @@ with sync_playwright() as pw:
     pg.fill('#q', ''); pg.locator('.quick button', has_text='Pulir lo último').click()
     check('un botón rápido también entra en la bandeja', poll(lambda: pg.locator('#tray .tag').count() == 1))
     pg.click('#send')
+    check('con historial calcula el tiempo restante aproximado', poll(lambda: re.search(r'≈ \d+:\d\d restantes', pg.locator('#runbar').inner_text()) is not None, 4))
+    check('la estimación explica de dónde sale', 'parecida' in (pg.locator('#runbar span').nth(1).get_attribute('title') or ''))
+    check('la barra de progreso avanza', poll(lambda: pg.locator('#runbar .pb i').evaluate('e => parseFloat(e.style.width) > 0'), 4))
+    check('cuenta acciones hechas y en curso', poll(lambda: re.search(r'\d+ de \d+ acciones hechas', pg.locator('#runbar').inner_text()) is not None, 4))
     check('Enviar sin texto ejecuta solo la bandeja', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 2))
 
     # escribir con tus palabras: reconoce flujos que ya existen
@@ -227,6 +258,7 @@ with sync_playwright() as pw:
     # recarga: recupera el historial del chat
     pg.reload(); pg.wait_for_selector('.e.user')
     check('al recargar se recupera el chat', pg.locator('.e.user').count() >= 9)
+    check('...y los pasos con sus tiempos', pg.locator('.sg').count() >= 5 and pg.locator('.sg.run').count() == 0 and pg.locator('.sg .sgh .tm').first.inner_text() != '')
     br.close()
 
 print('Cierre por inactividad')

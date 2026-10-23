@@ -34,6 +34,8 @@ s.on('active', (e) => seen.active.push(e.tier + (e.agent ? ':' + e.agent : '')))
 s.on('delegate', (e) => seen.delegate.push(e));
 s.on('text', (e) => seen.text.push(e));
 s.on('tool', (e) => seen.tool.push(e));
+const ends = [];
+s.on('tool-end', (e) => ends.push(e));
 s.on('result', (e) => seen.result.push(e));
 s.on('route', (e) => seen.route.push(e));
 s.on('compacted', (e) => seen.compacted.push(e));
@@ -46,7 +48,14 @@ assert.equal(s.sessionId, 'sess-1');
 assert.deepEqual(seen.active, ['sonnet', 'haiku:limpiador', 'haiku:limpiador', 'sonnet']);
 assert.equal(seen.delegate[0].agentType, 'limpiador');
 assert.equal(seen.delegate[0].expectedTier, 'haiku');
-assert.equal(seen.tool[0].agent, 'limpiador');
+assert.equal(seen.tool.find((t) => t.name === 'Edit').agent, 'limpiador');
+// pasos con id, instrucción completa y fin (para la interfaz: modelo + instrucción + tiempo)
+const bash = seen.tool.find((t) => t.name === 'Bash');
+assert.equal(bash.id, 'tb1');
+assert.equal(bash.full, 'npm test -- --reporter=dot');
+assert.equal(seen.delegate[0].id, 'tu1');
+assert.ok(seen.delegate[0].full.includes('Borra los imports sin usar'), 'el detalle de la delegación lleva la instrucción');
+assert.deepEqual(ends.map((e) => e.id).sort(), ['tb1', 'tu1', 'tu2'], 'cada paso avisa cuando termina');
 assert.equal(seen.result[0].cost, 0.0123);
 const firstRun = seen.result[0].run;
 assert.ok(rules.startsWithName(seen.result[0].text, 'Frivan'));
@@ -469,6 +478,16 @@ assert.equal(r1.cost, 0.0123);
   assert.equal(sm.errors, 1);
   assert.ok(sm.tips.some((t) => t.includes('delega muy poco')), 'avisa si Sonnet delega <15%');
   assert.equal(history.load({ days: 7, cwd: '/otro' }).length, 0);
+  // tiempo aproximado: mediana de lo parecido; sin datos → null; general solo con 3+ tareas largas
+  const e1 = history.estimateMs('Limpiar');
+  assert.deepEqual([e1.ms, e1.n, e1.basis], [1000, 6, 'similares']);
+  assert.equal(history.estimateMs('Tarea rara'), null, 'con tareas cortas no se inventa un tiempo general');
+  for (const ms of [40000, 60000, 90000]) history.record({ ...base, label: 'Otra', ms });
+  assert.deepEqual([history.estimateMs('Otra').ms, history.estimateMs('Otra').basis], [60000, 'similares']);
+  const g = history.estimateMs('Nunca vista');
+  assert.ok(g && g.basis === 'general' && g.ms === 60000 && g.n === 3);
+  history.record({ ...base, label: 'Limpiar', ms: 99999999, error: true });
+  assert.equal(history.estimateMs('Limpiar').ms, 1000, 'las que fallaron no cuentan');
 }
 
 // 11k) lecciones y reglas con import

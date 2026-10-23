@@ -101,6 +101,7 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
   let idleTimer = null;
   let stateTimer = null;
   let url = '';
+  const stepMap = new Map();
 
   const send = (res, event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* cliente cerrado */ } };
   const broadcast = (event, data) => { for (const c of clients) send(c, event, data); };
@@ -111,6 +112,24 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
       logBuf.push(entry);
       if (logBuf.length > 3000) logBuf.splice(0, logBuf.length - 2500);
       broadcast('log', entry);
+    },
+    // Pasos de la tarea (herramientas y subagentes): tarjetas desplegables con modelo, instrucción y tiempo
+    step(e) {
+      const entry = { i: ++seq, k: 'step', id: String(e.id), tier: e.tier || 'other', agent: e.agent || null, name: String(e.name || ''), detail: String(e.detail || '').slice(0, 300), full: String(e.full || '').slice(0, 2000), kind: e.kind, start: e.start, end: null, error: false };
+      logBuf.push(entry);
+      stepMap.set(entry.id, entry);
+      if (stepMap.size > 6000) stepMap.clear();
+      if (logBuf.length > 3000) logBuf.splice(0, logBuf.length - 2500);
+      broadcast('log', entry);
+    },
+    stepEnd({ id, end, error }) {
+      const e = stepMap.get(String(id));
+      if (!e || e.end) return;
+      e.end = end; e.error = !!error;
+      broadcast('stepend', { id: e.id, end, error: !!error });
+    },
+    stepsClose(end) { // al terminar la instrucción, lo que quedara abierto se da por cerrado
+      for (const e of stepMap.values()) if (!e.end) { e.end = end; broadcast('stepend', { id: e.id, end, error: false }); }
     },
     setInput(text) { broadcast('input', { text: text || '' }); },
     focusInput() {},

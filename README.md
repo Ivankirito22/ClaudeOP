@@ -151,6 +151,12 @@ Cuando escribes algo, **Haiku lee tu frase** (un par de segundos, casi sin gasto
 - Además, Sonnet lleva el catálogo de flujos en su política para imitarlos en lo que se escape.
 - `!` al principio envía tu frase literal, sin enrutar. `/autoflujos off` desactiva todo esto.
 
+### Qué está haciendo, qué hizo y cuánto le falta
+
+- **Pasos desplegables** (como en Claude): cada tanda de acciones sale como una línea plegada («Ejecutando · Bash npm test», luego «5 acciones · 2 subagentes»). Un clic en la flecha enseña cada paso con su **modelo** (haiku/sonnet/opus), su **instrucción** y su **tiempo**; un clic en un paso enseña el comando o la orden completa que recibió el subagente. El botón «detalle» abre todos.
+- **Cronómetro** de la tarea (también en el chip de arriba y en el título de la pestaña) y **tiempo aproximado restante**: se calcula con lo que tardaron las últimas veces parecidas (misma etiqueta/flujo); si es una tarea nueva usa tus últimas tareas largas, y la primera vez dice «sin datos para estimar» en vez de inventarse nada. Si se pasa, avisa de que tarda más de lo habitual. Barra de progreso y «3 de 5 acciones hechas».
+- En `--terminal` el cronómetro, el restante y las acciones salen en la cabecera, y cada subagente anota cuánto tardó.
+
 ### Plan previo con checks
 
 Antes de ejecutar un trabajo te enseña **qué va a hacer**, con todo marcado: los flujos elegidos, los pasos (explorar, documentación, plan con arquitecto, implementar, limpieza, probar, revisar, documentar, verificar…) y los especialistas que entran. Desmarcas lo que no te interesa (un flujo entero, un paso o un especialista) y pulsas **Ejecutar plan** (o Enter); lo desmarcado le llega a Claude como «NO hagas esto». Esc o **Cancelar** no ejecuta nada. En el modo terminal: escribe los números para marcar/desmarcar, Enter ejecuta, `x` cancela. Las preguntas, los cambios pequeños y las frases con `!` no piden plan. `/plan off` lo desactiva (se guarda).

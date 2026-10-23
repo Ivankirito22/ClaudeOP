@@ -29,6 +29,7 @@ const PRIMARY = new Set(['/feature', '/bugprofundo', '/auditoria', '/pulir', 'ch
 
 export const kfmt = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n)));
 export const bar = (f, w = 10) => '█'.repeat(Math.max(0, Math.min(w, Math.round(f * w)))).padEnd(w, '░');
+export const fmtDur = (ms) => { const t = Math.max(0, Math.round((ms || 0) / 1000)); const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const sec = t % 60; return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`; };
 export const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 
 export function createApp(cwd, ui) {
@@ -58,6 +59,8 @@ export function createApp(cwd, ui) {
   let thinking = false; // Haiku está leyendo tu petición para elegir flujos
   let warnedRouter = false;
   let planState = null; // plan previo esperando que lo confirmes: { plan, text, general, label, ... }
+  let runMeta = null; // instrucción en curso: { start, label, est, steps, done, delegations }
+  const stepInfo = new Map(); // id de herramienta/subagente -> { start, name, agent, kind }
   let tray = []; // acciones pulsadas que se enviarán juntas (más lo que escribas) al pulsar Enviar
   let pending = null; // acción a medias: { main, wrap, label, queue } — se aplica a lo que escribas a continuación
   let currentLabel = null; // etiqueta de la instrucción en curso (para historial)
@@ -898,6 +901,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       queueLen: queue.items.length,
       tray: trayActions().map((a) => ({ id: a.cmd, label: a.label, needsText: needsText(a) })),
       autoFlows: settings.autoFlows !== false,
+      run: session.busy && runMeta ? { start: runMeta.start, now: Date.now(), label: runMeta.label || null, steps: runMeta.steps, done: runMeta.done, delegations: runMeta.delegations, expectedMs: runMeta.est ? runMeta.est.ms : null, basis: runMeta.est ? runMeta.est.basis : null, basisN: runMeta.est ? runMeta.est.n : 0 } : null,
       planPreview: settings.planPreview !== false,
       plan: planState ? { note: planState.note || '', text: planState.text || '', items: planItems(planState.plan) } : null,
       tiers: TIERS.map((t) => ({ tier: t, msgs: st.tiers[t].msgs, inp: st.tiers[t].inp, out: st.tiers[t].out, share: st.tiers[t].out / total })),
@@ -942,7 +946,11 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   };
 
   session.on('busy', (b) => {
+    if (b && !runMeta) runMeta = { start: Date.now(), label: currentLabel, est: session.silent ? null : history.estimateMs(currentLabel), steps: 0, done: 0, delegations: 0 };
     if (!b) {
+      runMeta = null;
+      if (ui.stepsClose) ui.stepsClose(Date.now());
+      stepInfo.clear();
       active = null;
       if (!queueRunning) {
         const q = afterIdle.splice(0);
@@ -972,12 +980,27 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     heading(tier, agent);
     log(esc(text).split('\n').map((l) => '  ' + l).join('\n'));
   });
-  session.on('tool', ({ tier, agent, name, detail }) => {
+  session.on('tool', ({ id, tier, agent, name, detail, full }) => {
+    if (runMeta) runMeta.steps++;
+    if (id) stepInfo.set(id, { start: Date.now(), name, agent, kind: 'tool' });
+    if (ui.step) return ui.step({ id: id || 's' + Date.now(), kind: 'tool', tier, agent: agent || null, name, detail, full, start: Date.now() });
     heading(tier, agent);
     log(`  {gray-fg}⚙ ${esc(name)} ${esc(detail)}{/}`);
   });
-  session.on('delegate', ({ agentType, description, expectedTier }) => {
+  session.on('delegate', ({ id, agentType, description, expectedTier, full }) => {
+    if (runMeta) { runMeta.steps++; runMeta.delegations++; }
+    if (id) stepInfo.set(id, { start: Date.now(), name: agentType, kind: 'agent' });
+    if (ui.step) return ui.step({ id: id || 'd' + Date.now(), kind: 'agent', tier: expectedTier, agent: agentType, name: agentType, detail: description, full, start: Date.now() });
     log(`  {${COLOR[expectedTier]}-fg}↳ delegando en {bold}${esc(agentType)}{/bold} (${expectedTier}){/}${description ? ' {gray-fg}' + esc(description) + '{/}' : ''}`);
+  });
+  session.on('tool-end', ({ id, error }) => {
+    const st = stepInfo.get(id);
+    if (!st) return;
+    stepInfo.delete(id);
+    if (runMeta) runMeta.done++;
+    const now = Date.now();
+    if (ui.stepEnd) return ui.stepEnd({ id, end: now, error });
+    if (st.kind === 'agent') log(`  {gray-fg}✓ ${esc(st.name)} terminó en ${fmtDur(now - st.start)}${error ? ' (con error)' : ''}{/}`);
   });
   session.on('stats', () => refresh());
   session.on('result', (r) => {
