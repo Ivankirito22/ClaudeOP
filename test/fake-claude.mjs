@@ -11,6 +11,20 @@ function run() {
   const out = (o) => console.log(JSON.stringify({ session_id: 'sess-1', ...o }));
   out({ type: 'system', subtype: 'init', model: 'claude-sonnet-5-5' });
 
+  // Enrutador (Haiku): devuelve JSON con el tipo de petición y los flujos que encajan (tolera faltas)
+  if (input.includes('enrutador de un asistente')) {
+    if (process.env.FAKE_ROUTER_FAIL) process.exit(1);
+    const req = (input.split('<<<')[1] || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const flows = [];
+    if (/optimi[zs]/.test(req)) flows.push('/optimizar');
+    if (/\b(crea|creame|modela|modelo)\b/.test(req)) flows.push('/feature');
+    const kind = /\?/.test(req) ? 'pregunta' : /color|rojo/.test(req) ? 'pequeno' : 'tarea';
+    const txt = JSON.stringify({ kind, flows });
+    out({ type: 'assistant', message: { id: 'r1', model: 'claude-haiku-5-5', content: [{ type: 'text', text: txt }], usage: { input_tokens: 300, output_tokens: 20 } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: txt, total_cost_usd: 0.0005, num_turns: 1, duration_ms: 300 });
+    return;
+  }
+
   // Modo resumen (compactación): sin herramientas
   if (a.includes('--tools')) {
     const sum = 'Resumen: objetivo X, archivos a.js, pendiente Y';

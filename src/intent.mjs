@@ -102,3 +102,83 @@ export function composePrompt(list, text) {
 
 ${parts.join('\n\n')}`;
 }
+
+// ---------- Enrutador con Haiku (entiende faltas de ortografía, jerga y frases raras) ----------
+export const FLOW_DESC = {
+  '/optimizar': 'optimizar el proyecto: limpiar, quitar duplicados, mejorar sin cambiar el comportamiento',
+  '/limpiar': 'quitar código muerto, imports sin usar',
+  '/md': 'crear o actualizar el CLAUDE.md del proyecto',
+  '/explicar': 'explicar qué hace el proyecto y cómo está organizado',
+  '/probar': 'ejecutar tests / compilar',
+  '/tests': 'escribir tests nuevos',
+  '/documentar': 'documentar el código (comentarios, README)',
+  '/bug': 'cazar un bug sencillo',
+  '/bugprofundo': 'arreglar un bug o error a fondo (reproducir, causa raíz, test)',
+  '/revisar': 'revisar el código / los cambios',
+  '/seguridad': 'auditoría de seguridad',
+  '/auditoria': 'auditoría completa (calidad + seguridad), solo lectura',
+  '/refactor': 'refactorizar sin romper nada',
+  '/decidir': 'investigar opciones/librerías y decidir cuál usar',
+  '/pulir': 'segunda pasada sobre lo último que se cambió',
+  '/rendimiento': 'cazar cuellos de botella, lag, cosas lentas',
+  '/release': 'preparar una release/versión (changelog)',
+  '/plugins': 'recomendar plugins o servidores MCP',
+  '/investigar': 'investigar algo en la web',
+  '/feature': 'crear/implementar algo nuevo (funcionalidad, modelo, pantalla, sistema…)',
+};
+
+export const ROUTER_MARK = 'enrutador de un asistente de programación';
+
+export function routerPrompt(text, actions) {
+  const list = actions.map((a) => `${a.cmd}: ${FLOW_DESC[a.cmd] || a.label}`).join('\n');
+  return `Eres el ${ROUTER_MARK}. Lee la petición del usuario (puede tener faltas de ortografía, jerga, mezcla de idiomas o estar mal redactada: entiende lo que quiere decir) y responde SOLO con un JSON en una línea, sin texto extra ni explicaciones:
+{"kind":"pregunta|pequeno|tarea","flows":["/comando",...]}
+- kind: "pregunta" = solo quiere información o una explicación; "pequeno" = un cambio trivial (un archivo, pocas líneas); "tarea" = cualquier otra cosa que implique construir, cambiar, arreglar, optimizar, analizar o planificar.
+- flows: los flujos de esta lista que encajan con lo que PIDE (puede haber varios; [] si ninguno encaja). No inventes comandos.
+Flujos:
+${list}
+
+Petición del usuario:
+<<<
+${text}
+>>>`;
+}
+
+// Devuelve { kind, cmds } o null si la respuesta no es utilizable
+export function parseRouter(out, allowed) {
+  const m = /\{[\s\S]*?\}/.exec(String(out || ''));
+  if (!m) return null;
+  let j;
+  try { j = JSON.parse(m[0]); } catch { return null; }
+  const kind = ['pregunta', 'pequeno', 'pequeño', 'tarea'].includes(j.kind) ? (j.kind === 'pequeño' ? 'pequeno' : j.kind) : null;
+  if (!kind) return null;
+  const cmds = (Array.isArray(j.flows) ? j.flows : []).filter((c) => typeof c === 'string' && allowed.includes(c));
+  return { kind, cmds: [...new Set(cmds)].sort((a, b) => rank(a) - rank(b)) };
+}
+
+// Sin Haiku (sin red, sin login…): palabras clave y una estimación del tipo de petición
+export function localRoute(text) {
+  const cmds = detectCmds(text);
+  const t = norm(text).trim();
+  const words = t.split(/\s+/).filter(Boolean).length;
+  const question = /\?\s*$/.test(t) || /^[\s¿]*(que|como|por que|donde|cual|cuando|quien|cuanto)\b/.test(t);
+  const kind = question ? 'pregunta' : words >= 6 || cmds.length ? 'tarea' : 'pequeno';
+  return { kind, cmds };
+}
+
+// Para lo que no encaja con ningún flujo pero es un trabajo de verdad: el método completo, igualmente
+export const GENERAL = {
+  cmd: '/general',
+  label: 'Método general',
+  wrap: (t) => `MÉTODO GENERAL (esta petición no encaja con un flujo concreto; aplica igualmente el método de trabajo completo). Petición: ${t}
+
+1. Criterio de "hecho": 1-2 líneas.
+2. ENTENDER — en PARALELO: explorador mapea lo relacionado (si hay código o archivos) e investigador busca documentación solo si hace falta una API/librería que no conoces.
+3. PLANIFICAR — arquitecto solo si es grande o tiene decisiones difíciles (3+ archivos, algoritmos, diseño); si no, un plan de 3 líneas tuyo.
+4. HACER — implementa tú (o el especialista del stack si es grande); lo mecánico (renombres, boilerplate, borrar lo muerto) a limpiador. No hagas tú lo que un agente barato hace igual de bien.
+5. COMPROBAR — en PARALELO: probador (tests/build/lint, solo fallos) y revisor (revisa el diff).
+6. OPTIMIZAR — una pasada corta sobre lo que acabas de tocar: código muerto, duplicados, cuellos de botella evidentes (limpiador; arquitecto solo si hay una decisión de rendimiento difícil).
+7. VERIFICAR — verificador contra el criterio de "hecho" si el cambio toca más de 2 archivos o es arriesgado.
+Si la petición es solo de análisis o planificación (no hay que tocar archivos), salta 4-7 y entrega el análisis o el plan (con arquitecto si es difícil).
+Termina con: qué hiciste, archivos tocados, resultado de tests y pendientes (máx. 10 líneas).`,
+};

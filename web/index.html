@@ -337,12 +337,15 @@ textarea:focus-visible { outline: none; }
     ca.appendChild(document.createTextNode(!a.installed ? 'claude no encontrado' : a.loggedIn ? 'Sesión ' + (a.method || 'activa') : 'Sin login · pulsa aquí'));
 
     var lv = $('live');
-    lv.className = 'chip live' + (S.busy ? ' busy' : '');
+    lv.className = 'chip live' + (S.busy || S.routing ? ' busy' : '');
     lv.innerHTML = '';
     if (S.busy) {
       var tier = S.active ? S.active.tier : null;
       lv.appendChild(el('span', 'spin'));
       lv.appendChild(el('span', tier ? 't-' + tier : '', (tier || 'pensando') + (S.active && S.active.agent ? ' · ' + S.active.agent : '')));
+    } else if (S.routing) {
+      lv.appendChild(el('span', 'spin'));
+      lv.appendChild(el('span', 't-haiku', 'leyendo tu frase…'));
     } else if (S.pending && S.pending.main) {
       lv.appendChild(el('span', 't-' + S.pending.main, 'próxima: ' + S.pending.main));
     } else if (S.queueRunning) {
@@ -433,8 +436,12 @@ textarea:focus-visible { outline: none; }
 
   // ---------- Entrada ----------
   function autosize() { inp.style.height = 'auto'; inp.style.height = Math.min(220, inp.scrollHeight) + 'px'; }
-  function submit() {
-    if (busy) { post('cancel'); return; }
+  function submit(fromButton) {
+    if (busy) {
+      // El botón «Cancelar» sí cancela; Enter con la tarea en curso NO (así no matas una tarea escribiendo la siguiente)
+      if (fromButton === true) post('cancel');
+      return;
+    }
     var t = inp.value.trim();
     if (!t && !(S && S.tray.length)) return;
     if (t) { hist.push(t); hi = hist.length; }
@@ -451,7 +458,7 @@ textarea:focus-visible { outline: none; }
       else if (S.pending) { post('cancel-pending'); inp.value = ''; autosize(); }
     }
   });
-  $('send').addEventListener('click', submit);
+  $('send').addEventListener('click', function () { submit(true); });
   $('pendingX').addEventListener('click', function () { post('cancel-pending'); inp.value = ''; autosize(); inp.focus(); });
   $('chipProfile').addEventListener('click', function () { post('press', { id: 'profile' }); });
   $('chipPerm').addEventListener('click', function () { post('press', { id: 'perm' }); });

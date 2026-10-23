@@ -607,7 +607,48 @@ export class Session extends EventEmitter {
     return summary;
   }
 
+  // Pregunta corta a Haiku, sin herramientas y sin tocar la sesión (para el enrutador). Devuelve el texto o null.
+  classify(prompt, timeoutMs = 20000) {
+    return new Promise((resolve) => {
+      let child;
+      let out = '';
+      let buf = '';
+      let result = null;
+      let settled = false;
+      const done = (v) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.classifyChild = null;
+        resolve(v);
+      };
+      const feed = (line) => {
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === 'result' && !ev.is_error) result = String(ev.result || '');
+        } catch { /* no JSON */ }
+      };
+      try {
+        const c = claudeCmd(['-p', '--model', MODELS.haiku, '--output-format', 'stream-json', '--verbose', '--tools', '']);
+        child = spawn(c.file, c.args, { cwd: os.tmpdir(), shell: c.shell, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+      } catch { return done(null); }
+      this.classifyChild = child;
+      const timer = setTimeout(() => { try { child.kill(); } catch { /* ya terminó */ } done(null); }, timeoutMs);
+      child.stdout.on('data', (d) => {
+        buf += d.toString();
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) { out = buf.slice(0, i).trim(); if (out) feed(out); buf = buf.slice(i + 1); }
+      });
+      child.on('error', () => done(null));
+      child.on('close', () => { if (buf.trim()) feed(buf.trim()); done(result); });
+      child.stderr.on('data', () => {});
+      child.stdin.on('error', () => {});
+      child.stdin.end(prompt);
+    });
+  }
+
   cancel() {
+    if (this.classifyChild) { try { this.classifyChild.kill(); } catch { /* ya terminó */ } }
     if (!this.child) return false;
     this.cancelled = true;
     try {

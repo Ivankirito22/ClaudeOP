@@ -610,6 +610,38 @@ assert.equal(r1.cost, 0.0123);
   assert.ok(pol.includes('Known workflows') && pol.includes('Optimizar proyecto'), 'la política lleva el catálogo de flujos');
 }
 
+// 13c) enrutador: Haiku (falso) elige flujos, método general, cambio pequeño, y si Haiku falla → palabras clave
+{
+  const it = await import('../src/intent.mjs');
+  assert.deepEqual(it.parseRouter('ruido {"kind":"tarea","flows":["/optimizar","/nada"]} fin', ['/optimizar', '/feature']), { kind: 'tarea', cmds: ['/optimizar'] });
+  assert.equal(it.parseRouter('no es json', ['/optimizar']), null);
+  assert.equal(it.parseRouter('{"kind":"otra"}', ['/optimizar']), null);
+  const { createApp } = await import('../src/app.mjs');
+  const dir = fs.mkdtempSync(path.join(tmpHome, 'route-'));
+  process.env.FAKE_ECHO = '1';
+  const drive = async (text) => {
+    const logs = [];
+    const app = createApp(dir, { log: (t) => logs.push(String(t)), setInput() {}, focusInput() {}, changed() {}, quit() {}, shortcuts: '' });
+    app.handle(text);
+    for (let i = 0; i < 100 && !logs.some((l) => l.includes('terminado')); i++) await new Promise((r) => setTimeout(r, 100));
+    app.dispose();
+    return logs.join('\n');
+  };
+  let o = await drive('créame un modelo de enemigo y optimisalo');
+  assert.ok(o.includes('Haiku leyó tu petición y usa Feature completa + Optimizar proyecto') && o.includes('### Flujo 2: Optimizar proyecto'), 'Haiku entiende la frase con faltas');
+  o = await drive('planifica la economía del juego con precios dinámicos');
+  assert.ok(o.includes('método general') && o.includes('MÉTODO GENERAL'), 'sin flujo pero con trabajo: método general');
+  o = await drive('cambia el color del botón a rojo');
+  assert.ok(o.includes('cambio pequeño') && !o.includes('FLUJO') && !o.includes('MÉTODO GENERAL'));
+  o = await drive('!créame un modelo');
+  assert.ok(!o.includes('Haiku') && !o.includes('FLUJO'), '«!» va literal');
+  process.env.FAKE_ROUTER_FAIL = '1';
+  o = await drive('optimiza el código del enemigo');
+  assert.ok(o.includes('No pude consultar a Haiku') && o.includes('Reconozco lo que pides') && o.includes('Optimizar proyecto'), 'sin Haiku: palabras clave');
+  delete process.env.FAKE_ROUTER_FAIL;
+  delete process.env.FAKE_ECHO;
+}
+
 // 12) login detectado
 assert.equal(authStatus().loggedIn, true);
 

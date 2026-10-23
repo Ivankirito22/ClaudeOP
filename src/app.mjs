@@ -12,7 +12,7 @@ import { detectStack } from './stack.mjs';
 import { TaskQueue } from './queue.mjs';
 import { scanDocs, digestState, contextFiles, contextPrompt, readable, CONTEXT_REL } from './docs.mjs';
 import { currentVersion, checkUpdate, runUpdate } from './update.mjs';
-import { detectCmds, composePrompt, needsText, rank, MAX_FLOWS } from './intent.mjs';
+import { composePrompt, needsText, rank, MAX_FLOWS, routerPrompt, parseRouter, localRoute, GENERAL } from './intent.mjs';
 
 export const esc = (s) => String(s).replace(/[{}]/g, (c) => (c === '{' ? '{open}' : '{close}'));
 export const COLOR = { haiku: 'green', sonnet: 'cyan', opus: 'magenta', other: 'white' };
@@ -54,6 +54,8 @@ export function createApp(cwd, ui) {
   let auth = { loggedIn: false, installed: true, method: null };
   let active = null;
   let lastLabel = '';
+  let thinking = false; // Haiku está leyendo tu petición para elegir flujos
+  let warnedRouter = false;
   let tray = []; // acciones pulsadas que se enviarán juntas (más lo que escribas) al pulsar Enviar
   let pending = null; // acción a medias: { main, wrap, label, queue } — se aplica a lo que escribas a continuación
   let currentLabel = null; // etiqueta de la instrucción en curso (para historial)
@@ -78,12 +80,12 @@ export function createApp(cwd, ui) {
   }
 
   // ---------- Enviar instrucciones ----------
-  function send(prompt, { display, label, main } = {}) {
+  function send(prompt, { display, label, main, skipEcho } = {}) {
     if (session.busy) { log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}'); return false; }
     lastLabel = '';
     active = null;
     currentLabel = label || null;
-    log(`\n{bold}› ${esc(display || label || prompt)}{/bold}`);
+    if (!skipEcho) log(`\n{bold}› ${esc(display || label || prompt)}{/bold}`);
     const t = history.typicalCost(label);
     if (t) log(`{gray-fg}≈ $${t.cost.toFixed(2)} suele costar esto (media de ${t.n} veces){/}`);
     session.run(prompt, { label, ...(main ? { main } : {}) }).catch((e) => log(`{red-fg}${esc(e.message)}{/}`));
@@ -126,32 +128,60 @@ export function createApp(cwd, ui) {
   function removeFromTray(cmd) { tray = tray.filter((c) => c !== cmd); refresh(); }
   function clearTray() { tray = []; refresh(); }
 
-  // Bandeja + texto (+ flujos reconocidos en el texto) → UNA instrucción
-  function sendTray(raw) {
+  // Haiku lee tu petición (barato y tolera faltas); si no responde, palabras clave
+  async function route(text, allowed) {
+    const words = text.split(/\s+/).filter(Boolean).length;
+    if (words < 3) return { ...localRoute(text), how: 'palabras' };
+    thinking = true;
+    refresh();
+    let out = null;
+    try { out = await session.classify(routerPrompt(text, allowed)); } finally { thinking = false; refresh(); }
+    const r = out ? parseRouter(out, allowed.map((a) => a.cmd)) : null;
+    if (r) return { ...r, how: 'haiku' };
+    if (!warnedRouter) {
+      warnedRouter = true;
+      log('{gray-fg}(No pude consultar a Haiku para entender tu frase; uso el reconocimiento por palabras clave.){/}');
+    }
+    return { ...localRoute(text), how: 'palabras' };
+  }
+
+  // Bandeja + texto → Haiku elige flujos → UNA instrucción (con método general si no encaja ninguno pero es trabajo)
+  async function sendTray(raw) {
+    if (thinking) return log('{gray-fg}Un segundo, estoy leyendo tu petición…{/}');
     if (session.busy) return log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}');
     let text = String(raw || '').trim();
     let literal = false;
     if (text.startsWith('!')) { literal = true; text = text.slice(1).trim(); }
     const chosen = trayActions();
-    let auto = [];
-    if (!literal && settings.autoFlows !== false && text) {
-      auto = detectCmds(text).map(findAction).filter((a) => a && isStackable(a) && !tray.includes(a.cmd));
-    }
-    let all = [...chosen, ...auto];
-    if (all.length > MAX_FLOWS) all = all.slice(0, MAX_FLOWS);
-    all.sort((a, b) => rank(a.cmd) - rank(b.cmd));
-    if (!all.length && !text) return;
-    const need = all.find((a) => needsText(a));
+    if (!chosen.length && !text) return;
+    const need = chosen.find((a) => needsText(a));
     if (need && !text) return log(`{yellow-fg}«${esc(need.label)}» necesita que escribas qué quieres (la caja de abajo).{/}`);
-    const label = all.length ? all.map((a) => a.label).join(' + ') : undefined;
-    const display = label ? (text ? `${label}: ${text}` : label) : text;
-    const recognized = all.filter((a) => auto.includes(a));
+
+    // Se ve tu mensaje enseguida; Haiku tarda un par de segundos
+    const chosenLabel = chosen.map((a) => a.label).join(' + ');
+    log(`\n{bold}› ${esc(chosenLabel ? (text ? `${chosenLabel}: ${text}` : chosenLabel) : text)}{/bold}`);
     tray = [];
     ui.setInput('');
-    const ok = send(composePrompt(all, text), { display, label });
-    if (ok && recognized.length) {
-      log(`{gray-fg}↪ Reconozco lo que pides y uso ${esc(recognized.map((a) => a.label).join(' + '))} (ya existe como flujo). Para que vaya literal, empieza con «!».{/}`);
+
+    let auto = [];
+    let general = false;
+    let note = '';
+    if (!literal && settings.autoFlows !== false && text) {
+      const allowed = actions.filter((a) => isStackable(a) && a.cmd !== '/bug');
+      const r = await route(text, allowed);
+      if (session.busy) return log('{yellow-fg}Mientras tanto empezó otra tarea; vuelve a enviarlo cuando termine.{/}');
+      auto = r.cmds.map(findAction).filter((a) => a && !chosen.includes(a));
+      const who = r.how === 'haiku' ? 'Haiku leyó tu petición' : 'Reconozco lo que pides';
+      if (auto.length) note = `${who} y usa ${auto.map((a) => a.label).join(' + ')} (ya existe como flujo).`;
+      else if (!chosen.length && r.kind === 'tarea') { general = true; note = `${who}: no encaja con un flujo concreto, pero es un trabajo de verdad → método general (explorar → planificar → hacer → comprobar → optimizar → verificar, con subagentes).`; }
+      else if (!chosen.length && r.kind === 'pequeno') note = `${who}: cambio pequeño, lo hago directo (delegando solo si hace falta).`;
     }
+    let all = general ? [GENERAL] : [...chosen, ...auto];
+    if (all.length > MAX_FLOWS) all = all.slice(0, MAX_FLOWS);
+    all.sort((a, b) => rank(a.cmd) - rank(b.cmd));
+    const label = all.length ? all.map((a) => a.label).join(' + ') : undefined;
+    const ok = send(composePrompt(all, text), { label, skipEcho: true });
+    if (ok && note) log(`{gray-fg}↪ ${esc(note)} Para que vaya literal, empieza con «!».{/}`);
     refresh();
   }
 
@@ -623,7 +653,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     '/salir': quit,
   };
 
-  function handle(raw) {
+  function handleInner(raw) {
     const text = (raw || '').trim();
     if (!text && !tray.length) return;
     if (text.startsWith('/')) {
@@ -650,6 +680,18 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       return send(p.wrap ? p.wrap(text) : text, { display: p.label ? `${p.label}: ${text}` : text, label: p.label, main: p.main });
     }
     return sendTray(text);
+  }
+
+  // Los comandos pueden ser asíncronos (Haiku lee la frase): un error nunca debe tumbar la app
+  function handle(raw) {
+    try {
+      const r = handleInner(raw);
+      if (r && typeof r.catch === 'function') r.catch((e) => log(`{red-fg}${esc(e.message)}{/}`));
+      return r;
+    } catch (e) {
+      log(`{red-fg}${esc(e.message)}{/}`);
+      return undefined;
+    }
   }
 
   // ---------- Menú (lo pintan la web y la terminal) ----------
@@ -763,6 +805,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       active: active ? { tier: active.tier, agent: active.agent || null } : null,
       pending: pending ? { label: pending.label || null, main: pending.main || null, queue: !!pending.queue } : null,
       queueRunning,
+      routing: thinking,
       queueLen: queue.items.length,
       tray: trayActions().map((a) => ({ id: a.cmd, label: a.label, needsText: needsText(a) })),
       autoFlows: settings.autoFlows !== false,

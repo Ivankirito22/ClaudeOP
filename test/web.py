@@ -55,6 +55,9 @@ def poll(fn, timeout=15):
         time.sleep(0.15)
     return False
 
+def idle(pg):
+    return poll(lambda: pg.locator('#send').inner_text().startswith('Enviar') and pg.locator('#live').inner_text() == 'en espera')
+
 print('Navegador')
 with sync_playwright() as pw:
     br = pw.chromium.launch()
@@ -112,15 +115,25 @@ with sync_playwright() as pw:
     check('Enviar sin texto ejecuta solo la bandeja', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 2))
 
     # escribir con tus palabras: reconoce flujos que ya existen
-    pg.fill('#inp', 'créame un modelo de enemigo y optimízalo'); pg.keyboard.press('Enter')
-    check('texto libre: reconoce Feature completa + Optimizar', poll(lambda: 'Reconozco lo que pides y uso Feature completa + Optimizar proyecto' in pg.locator('#chat').inner_text()))
+    idle(pg); pg.fill('#inp', 'créame un modelo de enemigo y optimízalo'); pg.keyboard.press('Enter')
+    check('texto libre: Haiku elige Feature completa + Optimizar', poll(lambda: 'y usa Feature completa + Optimizar proyecto' in pg.locator('#chat').inner_text()))
     check('texto libre: termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 3))
     check('texto libre: el modelo recibe los flujos', 'Flujo 2: Optimizar proyecto' in pg.locator('#chat').inner_text())
-    n0 = pg.locator('#chat').inner_text().count('Reconozco lo que pides')
-    pg.fill('#inp', '!optimiza todo esto'); pg.keyboard.press('Enter')
-    check('«!» lo envía literal, sin flujos', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 4) and pg.locator('#chat').inner_text().count('Reconozco lo que pides') == n0)
-    pg.fill('#inp', '¿qué hace el módulo de enemigos?'); pg.keyboard.press('Enter')
-    check('una pregunta normal no dispara flujos', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 5) and pg.locator('#chat').inner_text().count('Reconozco lo que pides') == n0)
+    idle(pg); pg.fill('#inp', 'optimisa el codigo del enemigo porfa'); pg.keyboard.press('Enter')
+    check('con faltas de ortografía Haiku lo entiende igual', poll(lambda: 'y usa Optimizar proyecto' in pg.locator('#chat').inner_text()))
+    check('...y termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 4))
+    idle(pg); pg.fill('#inp', 'planifica la economía del juego con precios dinámicos'); pg.keyboard.press('Enter')
+    check('sin flujo que encaje pero siendo trabajo: método general', poll(lambda: 'método general' in pg.locator('#chat').inner_text()))
+    check('...el modelo recibe el método general completo', poll(lambda: 'MÉTODO GENERAL' in pg.locator('#chat').inner_text() and 'OPTIMIZAR' in pg.locator('#chat').inner_text()))
+    check('...y termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 5))
+    idle(pg); pg.fill('#inp', 'cambia el color del botón a rojo'); pg.keyboard.press('Enter')
+    check('un cambio pequeño va directo', poll(lambda: 'cambio pequeño' in pg.locator('#chat').inner_text()))
+    check('...y termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 6))
+    n0 = pg.locator('#chat').inner_text().count('ya existe como flujo')
+    idle(pg); pg.fill('#inp', '!optimiza todo esto'); pg.keyboard.press('Enter')
+    check('«!» lo envía literal, sin flujos', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 7) and pg.locator('#chat').inner_text().count('ya existe como flujo') == n0)
+    idle(pg); pg.fill('#inp', '¿qué hace el módulo de enemigos?'); pg.keyboard.press('Enter')
+    check('una pregunta normal no dispara flujos', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 8) and pg.locator('#chat').inner_text().count('ya existe como flujo') == n0)
 
     # chips rápidos
     pg.locator('.quick button', has_text='Ver cambios').click()
@@ -149,7 +162,7 @@ with sync_playwright() as pw:
 
     # XSS: el texto de Claude nunca se interpreta como HTML
     pg.fill('#inp', '<img src=x onerror="window.__x=1"> <b>hola</b>'); pg.keyboard.press('Enter')
-    check('otra instrucción termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 6))
+    check('otra instrucción termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 9))
     check('el HTML escrito no se ejecuta', pg.evaluate('window.__x') is None and pg.locator('#chat img').count() == 0)
 
     # móvil
@@ -163,7 +176,7 @@ with sync_playwright() as pw:
     check('sin errores en la consola del navegador', not errs, str(errs))
     # recarga: recupera el historial del chat
     pg.reload(); pg.wait_for_selector('.e.user')
-    check('al recargar se recupera el chat', pg.locator('.e.user').count() >= 5)
+    check('al recargar se recupera el chat', pg.locator('.e.user').count() >= 9)
     br.close()
 
 print('Cierre por inactividad')

@@ -141,10 +141,15 @@ Estilo Claude: negro cálido con acento naranja. Arriba, perfil, permisos, sesi�
 2. Si quieres, escribe algo con tus palabras: «y añade X», «el menú de pausa»…
 3. **Enter** (o *Enviar*): todo va junto como un único trabajo coordinado, con un solo explorador, el paralelismo de cada flujo y **un solo verificador al final**. Las revisiones/auditorías (solo lectura) se hacen después de implementar. Puedes enviar solo botones, sin texto (salvo flujos que preguntan algo, como *Feature completa*).
 
-### Escribir con tus palabras: reconoce los flujos que ya existen
+### Escribir con tus palabras: Haiku decide qué flujos usar
 
-Si escribes «oye, optimiza el código» uso el flujo *Optimizar proyecto*; «créame un modelo de enemigo y optimízalo» combina *Feature completa* + *Optimizar proyecto*; «arregla el login que falla» usa *Bug a fondo*; «cazar el lag del menú», *Cazar cuellos de botella*, etc. Te lo digo en el chat («↪ Reconozco lo que pides y uso…»). Además, el modelo principal lleva el catálogo de flujos en su política, así que para peticiones que ningún botón cubre aplica el mismo método (explorar → plan → implementar → probar+revisar en paralelo → verificar, y una pasada de optimización si la pides).
-Reglas: las preguntas («¿qué hace…?») y los cambios pequeños («haz un botón rojo») no disparan flujos pesados. Empieza con `!` para enviarlo literal, o `/autoflujos off` para desactivarlo.
+Cuando escribes algo, **Haiku lee tu frase** (un par de segundos, casi sin gasto: no usa herramientas ni tu proyecto) y devuelve qué tipo de petición es (pregunta / cambio pequeño / tarea) y qué flujos ya creados encajan. Entiende faltas de ortografía, jerga y frases mal montadas: «optimisa el codigo» = *Optimizar proyecto*; «créame un modelo de enemigo y optimízalo» = *Feature completa* + *Optimizar proyecto*; «arregla el login que falla» = *Bug a fondo*. Te lo cuenta en el chat («↪ Haiku leyó tu petición y usa…»).
+
+- **Si no encaja ningún flujo pero es un trabajo de verdad** (modelar, planificar, analizar, montar algo…), se aplica el **método general**: criterio de «hecho» → explorador (+ investigador) en paralelo → plan con arquitecto solo si es difícil → implementar delegando lo mecánico → probador + revisor en paralelo → pasada de optimización → verificador. Es decir: delega, optimiza y verifica aunque no exista un botón para eso.
+- **Preguntas y cambios pequeños** van directos (delegan solo si hace falta), para no gastar un flujo grande en poner un botón rojo.
+- Si Haiku no responde (sin red, sin login…), se usa un reconocimiento por palabras clave como respaldo y te avisa.
+- Además, Sonnet lleva el catálogo de flujos en su política para imitarlos en lo que se escape.
+- `!` al principio envía tu frase literal, sin enrutar. `/autoflujos off` desactiva todo esto.
 
 Comandos: `/feature /bugprofundo /refactor /decidir /auditoria /pulir /rendimiento /release /optimizar /limpiar /md /explicar /probar /tests /documentar /bug /revisar /seguridad /commit /plugins /investigar /rapido /profundo /condensar`
 `/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /auto-compactar /continuar /nombre /presupuesto /autoflujos /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
