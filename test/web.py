@@ -15,7 +15,7 @@ tmp = tempfile.mkdtemp()
 proj = os.path.join(tmp, 'juego'); os.makedirs(proj)
 open(os.path.join(proj, 'README.md'), 'w').write('# Juego\nUn juego.\n')
 env = dict(os.environ, CR_CLAUDE_BIN=f'node {ROOT}/test/fake-claude.mjs', CR_STATE_FILE=os.path.join(tmp, 'state.json'),
-           CR_HISTORY_FILE=os.path.join(tmp, 'hist.jsonl'), CR_NO_UPDATE_CHECK='1', CR_IDLE_MS='1500')
+           CR_HISTORY_FILE=os.path.join(tmp, 'hist.jsonl'), CR_NO_UPDATE_CHECK='1', CR_IDLE_MS='6000', FAKE_ECHO='1')
 p = subprocess.Popen(['node', f'{ROOT}/bin/cla.mjs', '--no-open'], cwd=proj, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 url = None
 t0 = time.time()
@@ -78,15 +78,25 @@ with sync_playwright() as pw:
     pg.locator('.grp > button', has_text='Proyecto').click()
     check('otro clic lo pliega', pg.locator('.grp.open').count() == 1)
 
-    # acción que pide texto: pulsa «Feature completa»
+    # bandeja: varios botones + texto propio, todo en UNA instrucción
     pg.locator('.grp.open .item', has_text='Feature completa').click()
-    pg.wait_for_selector('#pending.show')
-    check('aparece el aviso de acción a medias', 'Feature completa' in pg.locator('#pendingText').inner_text())
-    pg.fill('#inp', 'un menú de pausa')
-    pg.click('#send')
+    check('un clic mete «Feature completa» en la bandeja (no ejecuta nada)', poll(lambda: pg.locator('#tray .tag').count() == 1) and pg.locator('.e.user').count() == 0)
+    check('la caja pide que cuentes qué quieres', 'Feature completa' in (pg.get_attribute('#inp', 'placeholder') or ''))
+    pg.locator('.grp.open .item', has_text='Feature completa').click()
+    check('otro clic lo quita', poll(lambda: pg.locator('#tray .tag').count() == 0))
+    pg.locator('.grp.open .item', has_text='Feature completa').click()
+    pg.fill('#q', 'revisión de código')
+    pg.locator('.item', has_text='Revisión de código').click()
+    check('un segundo botón se suma', poll(lambda: pg.locator('#tray .tag').count() == 2))
+    check('el botón Enviar cuenta lo acumulado', 'Enviar (2)' in pg.locator('#send').inner_text())
+    if SHOTS: pg.screenshot(path=f'{SHOTS}/2a-bandeja.png')
+    pg.fill('#inp', 'un menú de pausa'); pg.click('#send')
     check('termina la instrucción', poll(lambda: 'terminado' in pg.locator('#chat').inner_text()))
     txt = pg.locator('#chat').inner_text()
-    check('la instrucción sale como mensaje de usuario', pg.locator('.e.user').count() == 1 and 'un menú de pausa' in txt)
+    user = pg.locator('.e.user').first.inner_text()
+    check('sale UN mensaje con los dos flujos y tu texto', pg.locator('.e.user').count() == 1 and 'Feature completa + Revisión de código' in user and 'un menú de pausa' in user)
+    check('a Claude le llegan los dos flujos y tu texto en una sola instrucción', 'Flujo 1: Feature completa' in txt and 'Flujo 2: Revisión de código' in txt and 'PETICIÓN DEL USUARIO' in txt and 'un menú de pausa' in txt)
+    check('la bandeja se vacía tras enviar', pg.locator('#tray .tag').count() == 0)
     check('se ve el reparto entre modelos', 'delegado' in txt)
     check('los chips del estado cuentan algo', '$' in pg.locator('#stats').inner_text())
     check('las líneas de herramientas están ocultas por defecto', all(not e.is_visible() for e in pg.locator('.e.tool').all()))
@@ -94,6 +104,23 @@ with sync_playwright() as pw:
     check('el botón «detalle» las muestra', pg.locator('.e.tool').count() == 0 or any(e.is_visible() for e in pg.locator('.e.tool').all()))
     check('la entrada se vacía y vuelve el botón Enviar', pg.locator('#send').inner_text() == 'Enviar')
     if SHOTS: pg.screenshot(path=f'{SHOTS}/2-tras-tarea.png')
+
+    # solo botones, sin escribir nada
+    pg.fill('#q', ''); pg.locator('.quick button', has_text='Pulir lo último').click()
+    check('un botón rápido también entra en la bandeja', poll(lambda: pg.locator('#tray .tag').count() == 1))
+    pg.click('#send')
+    check('Enviar sin texto ejecuta solo la bandeja', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 2))
+
+    # escribir con tus palabras: reconoce flujos que ya existen
+    pg.fill('#inp', 'créame un modelo de enemigo y optimízalo'); pg.keyboard.press('Enter')
+    check('texto libre: reconoce Feature completa + Optimizar', poll(lambda: 'Reconozco lo que pides y uso Feature completa + Optimizar proyecto' in pg.locator('#chat').inner_text()))
+    check('texto libre: termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 3))
+    check('texto libre: el modelo recibe los flujos', 'Flujo 2: Optimizar proyecto' in pg.locator('#chat').inner_text())
+    n0 = pg.locator('#chat').inner_text().count('Reconozco lo que pides')
+    pg.fill('#inp', '!optimiza todo esto'); pg.keyboard.press('Enter')
+    check('«!» lo envía literal, sin flujos', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 4) and pg.locator('#chat').inner_text().count('Reconozco lo que pides') == n0)
+    pg.fill('#inp', '¿qué hace el módulo de enemigos?'); pg.keyboard.press('Enter')
+    check('una pregunta normal no dispara flujos', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 5) and pg.locator('#chat').inner_text().count('Reconozco lo que pides') == n0)
 
     # chips rápidos
     pg.locator('.quick button', has_text='Ver cambios').click()
@@ -122,7 +149,7 @@ with sync_playwright() as pw:
 
     # XSS: el texto de Claude nunca se interpreta como HTML
     pg.fill('#inp', '<img src=x onerror="window.__x=1"> <b>hola</b>'); pg.keyboard.press('Enter')
-    check('segunda instrucción termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 2))
+    check('otra instrucción termina', poll(lambda: pg.locator('#chat').inner_text().count('terminado') >= 6))
     check('el HTML escrito no se ejecuta', pg.evaluate('window.__x') is None and pg.locator('#chat img').count() == 0)
 
     # móvil
@@ -136,7 +163,7 @@ with sync_playwright() as pw:
     check('sin errores en la consola del navegador', not errs, str(errs))
     # recarga: recupera el historial del chat
     pg.reload(); pg.wait_for_selector('.e.user')
-    check('al recargar se recupera el chat', pg.locator('.e.user').count() >= 2)
+    check('al recargar se recupera el chat', pg.locator('.e.user').count() >= 5)
     br.close()
 
 print('Cierre por inactividad')

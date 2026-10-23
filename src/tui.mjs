@@ -70,6 +70,8 @@ export function start(cwd = process.cwd()) {
     changed: () => { render(); },
     quit: () => { screen.destroy(); process.exit(0); },
     spawn: (file, args, opts) => screen.spawn(file, args, opts),
+    usePrefill: true,
+    verboseTray: true,
     shortcuts: 'Ctrl+B menú (↑↓ Enter, Espacio pliega) · Ctrl+X cancela · Ctrl+L limpia el chat · Ctrl+Q sale · ↑↓ historial · AvPág desplaza',
   };
 
@@ -84,7 +86,7 @@ export function start(cwd = process.cwd()) {
       ? `${SPIN[spin % SPIN.length]} {${COLOR[s.active?.tier || 'other']}-fg}${s.active ? s.active.tier : 'pensando'}${s.active?.agent ? ' · ' + s.active.agent : ''}{/}`
       : s.pending?.main ? `{${COLOR[s.pending.main]}-fg}próxima: ${s.pending.main}{/}` : s.queueRunning ? '{yellow-fg}cola…{/}' : '{gray-fg}en espera{/}';
     const where = blessed.escape(path.basename(cwd) || cwd) + (s.stack ? ` {gray-fg}(${blessed.escape(s.stack)}){/}` : '');
-    header.setContent(` {bold}claude-router{/bold} v${s.version}  ${where}  |  {bold}${s.profile.label}{/bold}  |  ${s.permission}  |  ${authBadge}  |  ${live}${s.update ? '  |  {yellow-fg}⬆ ' + s.update + '{/}' : ''}`);
+    header.setContent(` {bold}claude-router{/bold} v${s.version}  ${where}  |  {bold}${s.profile.label}{/bold}  |  ${s.permission}  |  ${authBadge}  |  ${live}${s.tray.length ? '  |  {green-fg}bandeja: ' + blessed.escape(s.tray.map((t) => t.label).join(' + ')) + '{/}' : ''}${s.update ? '  |  {yellow-fg}⬆ ' + s.update + '{/}' : ''}`);
   }
 
   function renderPanel() {
@@ -129,7 +131,7 @@ export function start(cwd = process.cwd()) {
       const sel = menuMode && i === cursor;
       const txt = r.kind === 'group'
         ? `{bold}{cyan-fg}${groupsState[r.group.name] ? '▾' : '▸'} ${blessed.escape(r.group.title.toUpperCase())}{/}`
-        : ` ${blessed.escape(r.item.label)}`;
+        : ` ${r.item.inTray ? '{green-fg}✓{/} ' : ''}${blessed.escape(r.item.label)}`;
       boxes[i].setContent(sel ? `{inverse}${txt}{/inverse}` : txt);
     });
     screen.render();
@@ -165,7 +167,7 @@ export function start(cwd = process.cwd()) {
     snap = app.snapshot();
     renderHeader();
     renderPanel();
-    const labelsChanged = app.menu().flatMap((g) => g.items.map((i) => i.label)).join('|');
+    const labelsChanged = app.menu().flatMap((g) => g.items.map((i) => i.label + (i.inTray ? '+' : ''))).join('|');
     if (labelsChanged !== render.last) { render.last = labelsChanged; buildMenu(); } else screen.render();
   }
 

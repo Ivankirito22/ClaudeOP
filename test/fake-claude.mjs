@@ -43,7 +43,7 @@ function run() {
     message: {
       id: 'm1', model: 'claude-sonnet-5-5',
       content: [
-        { type: 'text', text: 'Voy a delegar. args: ' + a.join(' ') + ' || input: ' + input.slice(0, 400) },
+        { type: 'text', text: 'Voy a delegar. args: ' + a.join(' ') + ' || input: ' + input.slice(0, process.env.FAKE_ECHO ? 9000 : 400) },
         { type: 'tool_use', id: 'tu1', name: 'Agent', input: { subagent_type: 'limpiador', description: 'Quitar código muerto', prompt: 'x' } },
       ],
       usage: { input_tokens: 100, output_tokens: 20 },

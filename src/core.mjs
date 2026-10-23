@@ -1,6 +1,7 @@
 // Núcleo de claude-router.
 // El modelo principal orquesta y delega en subagentes con otro modelo (Haiku / Sonnet / Opus)
 // DENTRO del mismo prompt. Todo va por Claude Code (`claude -p`): usa tu login, sin API key.
+import { FLOW_CATALOG } from './intent.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -205,6 +206,8 @@ ${specialists.length ? `- Implementation of more than ~20 lines inside a special
 ${p.rules}
 
 Parallelism: when sub-steps are independent (e.g. probador + revisor, several explorador queries, several investigador lookups), issue ALL their Agent calls in ONE message so they run at the same time. Never run in parallel agents that edit the same files.
+
+${FLOW_CATALOG}
 
 Quality loop: for any non-trivial task, first state in ONE line the "done" criterion; at the end check it. ${VERIFY_TEXT[effectiveVerify(verify, profile)]}
 

@@ -17,6 +17,7 @@ export const DEFAULTS = {
   remindEvery: 5, // cada cuántas instrucciones se antepone solo un recordatorio de reglas (0 = nunca)
   verify: 'auto', // verificación final: auto | siempre | nunca
   lessons: true, // Claude apunta lecciones en .claude/lecciones.md
+  autoFlows: true, // reconoce en lo que escribes los flujos que ya existen y los aplica solo
   contextDocs: true, // lee/indexa los MDs del proyecto para entrar en contexto
   checkpoints: true, // foto de la carpeta antes de cada instrucción (necesita git)
   blockPush: true, // bloquea git push / reset --hard / clean dentro de Claude

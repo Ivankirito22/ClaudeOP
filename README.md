@@ -133,12 +133,21 @@ Añade instrucciones (o comandos como `/auditoria`, `/probar`) con *Añadir a la
 
 ## Interfaz
 
-Menos ruido: arriba, el perfil, los permisos, la sesión y qué modelo trabaja ahora (clic para cambiar perfil/permisos); debajo, una línea de estado; en el centro, el chat (las líneas de herramientas ⚙ van ocultas, botón **detalle** para verlas); abajo, **botones rápidos** (Feature completa, Bug a fondo, Auditoría, Pulir, Ver cambios, Deshacer) y la caja de texto.
-El resto de acciones están en el menú de la izquierda, en grupos plegables (solo se abre el primero) y con **buscador** (`Ctrl+K`): **Flujos · Proyecto · Deshacer y cambios · Memoria · Cola · Modelo a mano · Tuyas · Informes · Ajustes**. En el móvil o con la ventana estrecha el menú es un cajón (☰).
-Teclas: `Enter` envía, `Shift+Enter` salto de línea, `↑` historial, `Esc` cancela una acción a medias. Escribir comandos (`/estado`…) sigue funcionando.
+Estilo Claude: negro cálido con acento naranja. Arriba, perfil, permisos, sesión y qué modelo trabaja ahora (clic para cambiar perfil/permisos); debajo, una línea de estado; en el centro, el chat (las líneas de herramientas ⚙ van ocultas, botón **detalle** para verlas); abajo, la caja de escribir con **botones rápidos**. El resto de acciones están en el menú de la izquierda, en grupos plegables (solo se abre el primero) y con **buscador** (`Ctrl+K`). En el móvil o con la ventana estrecha el menú es un cajón (☰).
+
+### Bandeja: varios botones + lo que escribas, en UNA instrucción
+
+1. Pulsa uno o **varios** botones (Optimizar proyecto, Revisión de código, Feature completa…): cada uno se suma a la **bandeja** (clic otra vez, o ✕, lo quita).
+2. Si quieres, escribe algo con tus palabras: «y añade X», «el menú de pausa»…
+3. **Enter** (o *Enviar*): todo va junto como un único trabajo coordinado, con un solo explorador, el paralelismo de cada flujo y **un solo verificador al final**. Las revisiones/auditorías (solo lectura) se hacen después de implementar. Puedes enviar solo botones, sin texto (salvo flujos que preguntan algo, como *Feature completa*).
+
+### Escribir con tus palabras: reconoce los flujos que ya existen
+
+Si escribes «oye, optimiza el código» uso el flujo *Optimizar proyecto*; «créame un modelo de enemigo y optimízalo» combina *Feature completa* + *Optimizar proyecto*; «arregla el login que falla» usa *Bug a fondo*; «cazar el lag del menú», *Cazar cuellos de botella*, etc. Te lo digo en el chat («↪ Reconozco lo que pides y uso…»). Además, el modelo principal lleva el catálogo de flujos en su política, así que para peticiones que ningún botón cubre aplica el mismo método (explorar → plan → implementar → probar+revisar en paralelo → verificar, y una pasada de optimización si la pides).
+Reglas: las preguntas («¿qué hace…?») y los cambios pequeños («haz un botón rojo») no disparan flujos pesados. Empieza con `!` para enviarlo literal, o `/autoflujos off` para desactivarlo.
 
 Comandos: `/feature /bugprofundo /refactor /decidir /auditoria /pulir /rendimiento /release /optimizar /limpiar /md /explicar /probar /tests /documentar /bug /revisar /seguridad /commit /plugins /investigar /rapido /profundo /condensar`
-`/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /auto-compactar /continuar /nombre /presupuesto /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
+`/docs /contexto /cambios /deshacer /rehacer /git-init /cola /cola-ver /cola-run /cola-quitar /cola-limpiar /actualizar /informe /lecciones /stack /verificar /permitir /permitidos /push /recordatorio /reglas /recordar /compactar /auto-compactar /continuar /nombre /presupuesto /autoflujos /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir`
 
 ## Personalizar (acciones, subagentes y permisos tuyos)
 

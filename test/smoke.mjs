@@ -584,6 +584,32 @@ assert.equal(r1.cost, 0.0123);
   delete process.env.CR_UPDATE_CMD;
 }
 
+// 13b) reconocer flujos en texto libre y componer bandeja + texto
+{
+  const it = await import('../src/intent.mjs');
+  const d = (t) => it.detectCmds(t).join(' ');
+  assert.equal(d('oye, optimiza el código'), '/optimizar');
+  assert.equal(d('créame un modelo de esto y optimízalo'), '/feature /optimizar');
+  assert.equal(d('optimiza el rendimiento del menú'), '/rendimiento');
+  assert.equal(d('arregla el login que falla'), '/bugprofundo');
+  assert.equal(d('añade tests al inventario del juego por favor'), '/tests');
+  assert.equal(d('limpia el código muerto y optimiza'), '/optimizar');
+  assert.equal(d('¿qué hace este módulo?'), '', 'una pregunta no dispara flujos');
+  assert.equal(d('haz un botón rojo'), '', 'un cambio pequeño no dispara un flujo grande');
+  assert.equal(d('prepara la release'), '/release');
+  const byCmd = Object.fromEntries(ACTIONS.map((a) => [a.cmd, a]));
+  assert.ok(Object.keys(it.PATTERNS).every((c) => byCmd[c]), 'cada patrón apunta a una acción que existe');
+  const one = it.composePrompt([byCmd['/optimizar']], '');
+  assert.equal(one, byCmd['/optimizar'].prompt);
+  assert.ok(it.composePrompt([byCmd['/optimizar']], 'y el menú').includes('Petición concreta del usuario'));
+  assert.ok(it.composePrompt([byCmd['/feature']], 'un menú').includes('FLUJO «Feature completa». Petición: un menú'));
+  const two = it.composePrompt([byCmd['/feature'], byCmd['/revisar']], 'un menú');
+  assert.ok(two.startsWith('PETICIÓN DEL USUARIO') && two.includes('### Flujo 1: Feature completa') && two.includes('### Flujo 2: Revisión de código') && two.includes('UN solo verificador'));
+  assert.ok(it.rank('/feature') < it.rank('/revisar') && it.rank('/revisar') < it.rank('/release'));
+  const pol = core.buildPolicy('balanced', 'Frivan');
+  assert.ok(pol.includes('Known workflows') && pol.includes('Optimizar proyecto'), 'la política lleva el catálogo de flujos');
+}
+
 // 12) login detectado
 assert.equal(authStatus().loggedIn, true);
 

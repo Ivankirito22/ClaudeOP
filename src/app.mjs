@@ -12,6 +12,7 @@ import { detectStack } from './stack.mjs';
 import { TaskQueue } from './queue.mjs';
 import { scanDocs, digestState, contextFiles, contextPrompt, readable, CONTEXT_REL } from './docs.mjs';
 import { currentVersion, checkUpdate, runUpdate } from './update.mjs';
+import { detectCmds, composePrompt, needsText, rank, MAX_FLOWS } from './intent.mjs';
 
 export const esc = (s) => String(s).replace(/[{}]/g, (c) => (c === '{' ? '{open}' : '{close}'));
 export const COLOR = { haiku: 'green', sonnet: 'cyan', opus: 'magenta', other: 'white' };
@@ -53,6 +54,7 @@ export function createApp(cwd, ui) {
   let auth = { loggedIn: false, installed: true, method: null };
   let active = null;
   let lastLabel = '';
+  let tray = []; // acciones pulsadas que se enviarán juntas (más lo que escribas) al pulsar Enviar
   let pending = null; // acción a medias: { main, wrap, label, queue } — se aplica a lo que escribas a continuación
   let currentLabel = null; // etiqueta de la instrucción en curso (para historial)
   let ckptNote = null;
@@ -88,9 +90,15 @@ export function createApp(cwd, ui) {
     return true;
   }
 
+  const isStackable = (a) => !a.main && !!(a.prompt || a.wrap || a.input);
+  const findAction = (cmd) => actions.find((x) => x.cmd === cmd);
+  const trayActions = () => tray.map(findAction).filter(Boolean);
+
+  // Acciones que fuerzan el modelo (Haiku/Opus a mano) o no se apilan: se ejecutan solas, como antes
   function runAction(a) {
     pending = null;
     if (a.input) {
+      tray = [];
       pending = { main: a.main || null, wrap: a.wrap || null, label: a.label };
       ui.setInput(a.prefill || '');
       log(`{gray-fg}${esc(a.hint || a.label + ': completa la frase en la caja de abajo y pulsa Enter.')}{/}`);
@@ -99,6 +107,52 @@ export function createApp(cwd, ui) {
       send(a.prompt, { label: a.label, main: a.main });
     }
     focusInput();
+  }
+
+  // Clic (o comando escrito) en una acción apilable: entra o sale de la bandeja
+  function toggleTray(a) {
+    if (!isStackable(a)) return runAction(a);
+    pending = null;
+    const i = tray.indexOf(a.cmd);
+    if (i >= 0) tray.splice(i, 1);
+    else {
+      tray.push(a.cmd);
+      if (a.input && ui.usePrefill && a.prefill) ui.setInput(a.prefill);
+      if (ui.verboseTray) log(`{gray-fg}➕ ${esc(a.label)} en la bandeja${a.input ? ': escribe qué quieres' : ''}. Enter lo envía todo junto con lo que escribas; clic otra vez lo quita.{/}`);
+    }
+    refresh();
+    focusInput();
+  }
+  function removeFromTray(cmd) { tray = tray.filter((c) => c !== cmd); refresh(); }
+  function clearTray() { tray = []; refresh(); }
+
+  // Bandeja + texto (+ flujos reconocidos en el texto) → UNA instrucción
+  function sendTray(raw) {
+    if (session.busy) return log('{yellow-fg}Hay una tarea en curso. Cancélala primero.{/}');
+    let text = String(raw || '').trim();
+    let literal = false;
+    if (text.startsWith('!')) { literal = true; text = text.slice(1).trim(); }
+    const chosen = trayActions();
+    let auto = [];
+    if (!literal && settings.autoFlows !== false && text) {
+      auto = detectCmds(text).map(findAction).filter((a) => a && isStackable(a) && !tray.includes(a.cmd));
+    }
+    let all = [...chosen, ...auto];
+    if (all.length > MAX_FLOWS) all = all.slice(0, MAX_FLOWS);
+    all.sort((a, b) => rank(a.cmd) - rank(b.cmd));
+    if (!all.length && !text) return;
+    const need = all.find((a) => needsText(a));
+    if (need && !text) return log(`{yellow-fg}«${esc(need.label)}» necesita que escribas qué quieres (la caja de abajo).{/}`);
+    const label = all.length ? all.map((a) => a.label).join(' + ') : undefined;
+    const display = label ? (text ? `${label}: ${text}` : label) : text;
+    const recognized = all.filter((a) => auto.includes(a));
+    tray = [];
+    ui.setInput('');
+    const ok = send(composePrompt(all, text), { display, label });
+    if (ok && recognized.length) {
+      log(`{gray-fg}↪ Reconozco lo que pides y uso ${esc(recognized.map((a) => a.label).join(' + '))} (ya existe como flujo). Para que vaya literal, empieza con «!».{/}`);
+    }
+    refresh();
   }
 
   function cancelPending() {
@@ -151,6 +205,16 @@ export function createApp(cwd, ui) {
     persist();
     refresh();
     focusInput();
+  }
+
+  function toggleAutoFlows(arg) {
+    const a = String(arg || '').trim().toLowerCase();
+    settings.autoFlows = ['on', 'si', 'sí'].includes(a) ? true : ['off', 'no'].includes(a) ? false : settings.autoFlows === false;
+    log(settings.autoFlows
+      ? '{green-fg}Reconocer flujos: sí.{/} Si escribes «optimiza el código» o «créame X y optimízalo», uso los flujos que ya existen (y te lo digo). Con «!» al principio va literal.'
+      : '{bold}Reconocer flujos: no.{/} Lo que escribas va tal cual; solo se aplican los botones que pulses.');
+    persist();
+    refresh();
   }
 
   function setPush(arg) {
@@ -483,7 +547,7 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
   function help() {
     log(`
 {bold}Cómo funciona{/bold}
-  Escribes UNA instrucción (o pulsas un botón). Dentro de ella, el modelo principal reparte el trabajo:
+  Escribes UNA instrucción, o pulsas uno o VARIOS botones (se van sumando en la bandeja) y le añades lo que quieras: al enviar se hace todo junto en una sola instrucción. Si lo escribes con tus palabras («optimiza el código», «créame X y optimízalo») reconozco los flujos que ya existen y los uso (/autoflujos on|off; «!» al principio = literal). Dentro de ella, el modelo principal reparte el trabajo:
     {green-fg}● Haiku{/}   explorar, borrar líneas muertas, tests, docs, buscar en la web
     {cyan-fg}● Sonnet{/}  implementar, coordinar, depurar, revisar y verificar
     {magenta-fg}● Opus{/}    decisiones difíciles (arquitectura, bugs rebeldes)
@@ -504,7 +568,7 @@ ${all.tips.length ? all.tips.map((t) => `  {yellow-fg}→ ${esc(t)}{/}`).join('\
 {bold}Comandos{/bold}
   ${actions.map((a) => a.cmd).join('  ')}
   /cambios /deshacer /rehacer /git-init /informe [días] /lecciones /docs /contexto /stack /verificar /permitir X /permitidos /push /recordatorio N
-  /reglas /recordar /compactar /auto-compactar /continuar /nombre X /presupuesto N|off /actualizar
+  /reglas /recordar /compactar /auto-compactar /continuar /nombre X /presupuesto N|off /autoflujos /actualizar
   /perfil /permisos /login /logout /nuevo /gasto /estado /cancelar /ayuda /salir
 ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   }
@@ -540,6 +604,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
     '/permitir': addAllow,
     '/permitidos': showAllow,
     '/push': setPush,
+    '/autoflujos': toggleAutoFlows,
     '/cambios': showChanges,
     '/deshacer': doUndo,
     '/rehacer': doRedo,
@@ -560,27 +625,36 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
 
   function handle(raw) {
     const text = (raw || '').trim();
-    if (!text) return;
+    if (!text && !tray.length) return;
     if (text.startsWith('/')) {
       const [cmd, ...rest] = text.split(/\s+/);
       if (SYSTEM[cmd]) return SYSTEM[cmd](rest.join(' '));
-      const a = actions.find((x) => x.cmd === cmd);
-      if (a) return runAction(a);
+      const a = findAction(cmd);
+      if (a) {
+        if (!isStackable(a)) return runAction(a);
+        if (!tray.includes(a.cmd)) tray.push(a.cmd);
+        if (trayActions().some(needsText)) {
+          refresh();
+          log(`{gray-fg}«${esc(a.label)}» en la bandeja: escribe qué quieres y pulsa Enviar.{/}`);
+          return focusInput();
+        }
+        return sendTray('');
+      }
       return log(`{red-fg}Comando desconocido: ${esc(cmd)}{/} (escribe /ayuda)`);
     }
     const p = pending;
-    pending = null;
-    if (p?.queue) return queueAdd(text);
-    send(p?.wrap ? p.wrap(text) : text, {
-      display: p?.label ? `${p.label}: ${text}` : text,
-      label: p?.label,
-      main: p?.main,
-    });
+    if (p) {
+      pending = null;
+      if (!text) return undefined;
+      if (p.queue) return queueAdd(text);
+      return send(p.wrap ? p.wrap(text) : text, { display: p.label ? `${p.label}: ${text}` : text, label: p.label, main: p.main });
+    }
+    return sendTray(text);
   }
 
   // ---------- Menú (lo pintan la web y la terminal) ----------
   const byGroup = (g) => actions.filter((x) => (x.custom ? 'TUYAS' : x.group || (x.main ? 'MODELO A MANO' : 'PROYECTO')) === g);
-  const actionItems = (g) => byGroup(g).map((a) => ({ id: a.cmd, label: a.label, desc: a.hint || '', run: () => runAction(a) }));
+  const actionItems = (g) => byGroup(g).map((a) => ({ id: a.cmd, label: a.label, desc: a.hint || '', stack: isStackable(a), run: () => toggleTray(a) }));
   const prof = () => PROFILES[session.profile];
 
   function menuDef() {
@@ -633,6 +707,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       items: [
         { id: 'profile', label: `Perfil: ${prof().label}`, desc: prof().desc, run: cycleProfile },
         { id: 'perm', label: `Permisos: ${session.permission}`, run: cyclePerm },
+        { id: 'autoflows', label: `Reconocer flujos: ${settings.autoFlows !== false ? 'sí' : 'no'}`, desc: 'Si escribes con tus palabras, usa los flujos que ya existen', run: () => toggleAutoFlows('') },
         { id: 'verify', label: `Verificación: ${settings.verify}`, run: () => setVerify('') },
         { id: 'login', label: 'Login / estado', run: doLogin },
         { id: 'status', label: 'Ver estado completo', run: status },
@@ -652,7 +727,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       name: g.name,
       title: g.title,
       open: !settings.collapsed.includes(g.name),
-      items: g.items.map((i) => ({ id: i.id, label: i.label, desc: i.desc || '', primary: PRIMARY.has(i.id) })),
+      items: g.items.map((i) => ({ id: i.id, label: i.label, desc: i.desc || '', primary: PRIMARY.has(i.id), stack: !!i.stack, inTray: !!i.stack && tray.includes(i.id) })),
     }));
   }
 
@@ -689,6 +764,8 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
       pending: pending ? { label: pending.label || null, main: pending.main || null, queue: !!pending.queue } : null,
       queueRunning,
       queueLen: queue.items.length,
+      tray: trayActions().map((a) => ({ id: a.cmd, label: a.label, needsText: needsText(a) })),
+      autoFlows: settings.autoFlows !== false,
       tiers: TIERS.map((t) => ({ tier: t, msgs: st.tiers[t].msgs, inp: st.tiers[t].inp, out: st.tiers[t].out, share: st.tiers[t].out / total })),
       cost: st.cost,
       cacheRatio: st.cacheRatio,
@@ -853,7 +930,7 @@ ${ui.shortcuts ? '\n{bold}Atajos{/bold}  ' + ui.shortcuts : ''}`);
   }
 
   return {
-    handle, menu, press, snapshot, boot, cancelPending, setCollapsed, quit,
+    handle, menu, press, snapshot, boot, cancelPending, setCollapsed, quit, removeFromTray, clearTray,
     cancel: () => SYSTEM['/cancelar'](),
     cwd, session, settings,
     get queueRunning() { return queueRunning; },

@@ -119,7 +119,7 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
       stateTimer = setTimeout(() => { stateTimer = null; broadcast('state', fullState()); }, 80);
     },
     quit() { shutdown(0); },
-    shortcuts: 'Enter envía · Shift+Enter nueva línea · Ctrl+K busca una acción · Esc cancela la acción a medias',
+    shortcuts: 'Enter envía · Shift+Enter nueva línea · Ctrl+K busca una acción · Esc vacía la bandeja',
   };
 
   const app = createApp(cwd, ui);
@@ -218,6 +218,8 @@ export async function startWeb({ cwd = process.cwd(), open = true, port = 0, idl
           case '/api/press': return ok({ found: app.press(String(body.id || '')) });
           case '/api/cancel': app.cancel(); return ok();
           case '/api/cancel-pending': app.cancelPending(); return ok();
+          case '/api/tray-remove': app.removeFromTray(String(body.id || '')); return ok();
+          case '/api/tray-clear': app.clearTray(); return ok();
           default: return deny(res, 404, 'no existe');
         }
       }
