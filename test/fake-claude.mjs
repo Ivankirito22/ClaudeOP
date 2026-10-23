@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+// Imita a `claude` para probar el router sin gastar nada ni necesitar login.
+const a = process.argv.slice(2);
+if (a.includes('--version')) { console.log('2.1.302 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth' && a[1] === 'status') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' })); process.exit(0); }
+
+let input = '';
+process.stdin.on('data', (d) => (input += d));
+process.stdin.on('end', () => setTimeout(run, Number(process.env.FAKE_SLOW || 0) * 1000));
+function run() {
+  const out = (o) => console.log(JSON.stringify({ session_id: 'sess-1', ...o }));
+  out({ type: 'system', subtype: 'init', model: 'claude-sonnet-5-5' });
+
+  // Modo resumen (compactación): sin herramientas
+  if (a.includes('--tools')) {
+    const sum = 'Resumen: objetivo X, archivos a.js, pendiente Y';
+    out({ type: 'assistant', message: { id: 's1', model: 'claude-haiku-5-5', content: [{ type: 'text', text: sum }], usage: { input_tokens: 500, output_tokens: 30 } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: sum, total_cost_usd: 0.001, num_turns: 1, duration_ms: 400 });
+    return;
+  }
+
+  // Modos de prueba: FALLA => resultado con error; SOLOEDIT => el principal edita 5 veces sin delegar
+  if (input.includes('FALLA')) {
+    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'boom', total_cost_usd: 0.002, num_turns: 1, duration_ms: 100 });
+    return;
+  }
+  if (input.includes('SOLOEDIT')) {
+    out({
+      type: 'assistant',
+      message: {
+        id: 'e1', model: 'claude-sonnet-5-5',
+        content: [1, 2, 3, 4, 5].map((n) => ({ type: 'tool_use', id: 'ed' + n, name: 'Edit', input: { file_path: `f${n}.js` } })),
+        usage: { input_tokens: 100, output_tokens: 40 },
+      },
+    });
+    out({ type: 'assistant', message: { id: 'e2', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'Frivan, hecho solo' }], usage: { input_tokens: 10, output_tokens: 5 } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: 'Frivan, hecho solo', total_cost_usd: 0.05, num_turns: 2, duration_ms: 900 });
+    return;
+  }
+
+  out({
+    type: 'assistant',
+    message: {
+      id: 'm1', model: 'claude-sonnet-5-5',
+      content: [
+        { type: 'text', text: 'Voy a delegar. args: ' + a.join(' ') + ' || input: ' + input.slice(0, 400) },
+        { type: 'tool_use', id: 'tu1', name: 'Agent', input: { subagent_type: 'limpiador', description: 'Quitar código muerto', prompt: 'x' } },
+      ],
+      usage: { input_tokens: 100, output_tokens: 20 },
+    },
+  });
+  out({
+    type: 'assistant', parent_tool_use_id: 'tu1',
+    message: { id: 'm2', model: 'claude-haiku-5-5', content: [{ type: 'tool_use', id: 'tu2', name: 'Edit', input: { file_path: 'a.js' } }], usage: { input_tokens: 50, output_tokens: 10 } },
+  });
+  out({
+    type: 'assistant', parent_tool_use_id: 'tu1',
+    message: { id: 'm3', model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'hecho' }], usage: { input_tokens: 60, output_tokens: 5 } },
+  });
+  const final = (input.includes('SINNOMBRE') ? 'Listo, sin nombre. ' : 'Frivan, listo. ') + input.slice(0, 40).replace(/\n/g, ' ');
+  out({
+    type: 'assistant',
+    message: { id: 'm4', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: final }], usage: { input_tokens: 20, cache_read_input_tokens: 100, output_tokens: 15 } },
+  });
+  out({ type: 'result', subtype: 'success', is_error: false, result: final, total_cost_usd: 0.0123, num_turns: 3, duration_ms: 1500 });
+}

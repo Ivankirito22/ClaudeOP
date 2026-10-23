@@ -1,0 +1,39 @@
+{
+  "name": "claude-router",
+  "version": "0.4.0",
+  "description": "Panel con botones para Claude Code: Sonnet coordina y reparte el trabajo entre Haiku/Sonnet/Opus dentro de cada instrucción",
+  "type": "module",
+  "bin": {
+    "cla": "./bin/cla.mjs"
+  },
+  "scripts": {
+    "start": "node bin/cla.mjs",
+    "terminal": "node bin/cla.mjs --terminal",
+    "test": "node test/smoke.mjs",
+    "test:web": "python3 test/web.py",
+    "test:tui": "python3 test/ui-pty.py"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ivankirito22/ClaudeOP.git"
+  },
+  "homepage": "https://github.com/Ivankirito22/ClaudeOP#readme",
+  "bugs": {
+    "url": "https://github.com/Ivankirito22/ClaudeOP/issues"
+  },
+  "files": [
+    "bin",
+    "src",
+    "web",
+    "install.ps1",
+    "install.sh",
+    "README.md"
+  ]
+}
