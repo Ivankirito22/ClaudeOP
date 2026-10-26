@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA } from './data.mjs';
 
-export const DURATIONS = path.join(DATA, 'durations.jsonl');
+const DURATIONS = path.join(DATA, 'durations.jsonl');
 const MIN_SAMPLES = 3;
 const COMBO_FACTOR = 0.75; // varios flujos en un solo trabajo comparten exploración y verificación: tardan menos que la suma
 

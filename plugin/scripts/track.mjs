@@ -45,7 +45,7 @@ function append(rows) {
 function sweep() {
   try {
     for (const f of fs.readdirSync(DATA)) {
-      if (!/^(sess|main)-.*\.json$/.test(f)) continue;
+      if (!/^(sess|main|notify)-.*\.json$/.test(f)) continue;
       const p = path.join(DATA, f);
       if (Date.now() - fs.statSync(p).mtimeMs > DIAS_30) fs.rmSync(p);
     }

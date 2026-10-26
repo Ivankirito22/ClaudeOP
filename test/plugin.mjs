@@ -247,5 +247,37 @@ t = route('añade un endpoint nuevo en python con fastapi y pytest');
 assert.ok(t.includes('claudeop:especialista') && /Python:/.test(t) && !/Go:|Rust:/.test(t), 'guía de Python en la nota, sin cargar las demás');
 assert.ok(t.includes('estado.md') || !/Feature completa/.test(t), 'trabajo largo → archivo de estado');
 
+// ---- Avisos del sistema: solo cuando Claude te necesita o termina algo largo (el log sustituye al toast real) ----
+const nlog = path.join(tmp, 'notify.log');
+const dataN = path.join(tmp, 'data-notify');
+const notify = (kind, input, e = {}) => {
+  fs.rmSync(nlog, { force: true });
+  const r = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'notify.mjs'), kind], { input: JSON.stringify({ session_id: 'sn', cwd: 'C:\\trabajo\\mi-app', ...input }), encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: dataN, CLAUDEOP_NOTIFY_LOG: nlog, ...e } });
+  assert.equal(r.status, 0, r.stderr);
+  return fs.existsSync(nlog) ? fs.readFileSync(nlog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+};
+const setT0 = (secAgo) => w(path.join(dataN, 'sess-sn.json'), JSON.stringify({ prompt: 'n1', t0: Date.now() - secAgo * 1000 }));
+
+let n = notify('notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' });
+assert.ok(n.length === 1 && n[0].title.includes('permiso') && n[0].body.includes('mi-app') && n[0].body.includes('quiere usar Bash'), 'permiso: dice qué herramienta y de qué proyecto');
+n = notify('notification', { notification_type: 'elicitation_dialog', message: 'Elige una opción' });
+assert.ok(n.length === 1 && n[0].title.includes('respuesta'), 'una pregunta de un servidor MCP también avisa');
+for (const type of ['auth_success', 'elicitation_complete']) assert.equal(notify('notification', { notification_type: type }).length, 0, `${type} no avisa`);
+
+setT0(5);
+assert.equal(notify('stop', {}).length, 0, 'una respuesta corta no avisa (estás mirando la terminal)');
+setT0(125);
+n = notify('stop', {});
+assert.ok(n.length === 1 && n[0].title.includes('terminado') && /mi-app · 2 min/.test(n[0].body), `una petición larga avisa con proyecto y duración: ${JSON.stringify(n)}`);
+assert.equal(notify('stop', { background_tasks: [{ id: 'a' }] }).length, 0, 'con subagentes aún trabajando no avisa de que terminó');
+assert.equal(notify('notification', { notification_type: 'idle_prompt' }).length, 0, 'ya avisó de que terminó: no repite 1 min después');
+fs.rmSync(path.join(dataN, 'notify-sn.json'), { force: true });
+assert.ok(notify('notification', { notification_type: 'idle_prompt' })[0].title.includes('esperando'), 'si no avisó antes, el «te espero» sí sale');
+assert.equal(notify('stop', {}, { CLAUDEOP_NOTIFY: 'off' }).length, 0, 'CLAUDEOP_NOTIFY=off lo desactiva');
+setT0(40);
+assert.equal(notify('stop', {}, { CLAUDEOP_NOTIFY_MIN_SEC: '60' }).length, 0, 'el umbral se puede cambiar');
+assert.ok(notify('error', {})[0].title.includes('error'), 'un error también avisa');
+assert.ok(JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8')).hooks.Notification, 'el hook Notification está registrado');
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('plugin: todo OK');

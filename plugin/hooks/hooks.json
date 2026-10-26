@@ -39,7 +39,22 @@
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/track.mjs\" main", "async": true, "timeout": 20 }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/track.mjs\" main", "async": true, "timeout": 20 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.mjs\" stop", "async": true, "timeout": 30 }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.mjs\" error", "async": true, "timeout": 30 }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.mjs\" notification", "async": true, "timeout": 30 }
         ]
       }
     ]
