@@ -1,0 +1,12 @@
+{
+  "name": "claudeop",
+  "owner": { "name": "Ivankirito22" },
+  "metadata": { "description": "claudeop: delegación automática de modelos, flujos y agentes para Claude Code" },
+  "plugins": [
+    {
+      "name": "claudeop",
+      "source": "./plugin",
+      "description": "Instálalo y ya: Claude reconoce lo que pides, elige flujos y agentes (Haiku/Sonnet/Opus), usa tus skills, plugins y MCP instalados, y delega solo."
+    }
+  ]
+}

@@ -27,7 +27,11 @@ export const PATTERNS = {
   '/release': [P(/\brelease\b/), P(/prepara (la |una )?(version|entrega|release)/), P(/\bchangelog\b|sacar version|publicar version/)],
   '/plugins': [P(/\bplugins?\b/), P(/servidores? mcp|\bmcp\b/)],
   '/investigar': [P(/\binvestiga\w*/), P(/busca (en )?(la )?(web|internet)/), P(/documentacion oficial/)],
-  '/feature': [P(/\b(crea|creame|crear|haz|hazme|hacer|anade|anademe|anadir|agrega|implementa\w*|construye\w*|genera\w*|desarrolla\w*|programa\w*|make|build|add|implement|create)\b/, true)],
+  '/feature': [
+    P(/\b(modela\w*|modelame|renderiza\w*|anima(r|me)?)\b/),
+    P(/\bdisena\w* (un |una |el |la |los |las )?(modelo|personaje|nivel|pantalla|menu|interfaz|escena|sistema)/),
+    P(/\b(crea|creame|crear|haz|hazme|hacer|anade|anademe|anadir|agrega|implementa\w*|construye\w*|genera\w*|desarrolla\w*|programa\w*|make|build|add|implement|create)\b/, true),
+  ],
 };
 
 // Cuando una frase encaja con varios, el más específico gana

@@ -1,4 +1,32 @@
-# Claude Router (`cla`)
+# Claude Router (`cla`) y el plugin `claudeop`
+
+## Plugin `claudeop` (recomendado): cero botones, cero comandos
+
+Instálalo una vez y sigue usando Claude Code como siempre. Escribes «optimiza mi proyecto y modela un cubo en 3D» y Claude, **sin que toques nada**:
+
+1. Reconoce qué quieres (aunque tenga faltas de ortografía) y aplica los **flujos** que encajan (los mismos de `cla`: Feature completa, Bug a fondo, Refactor seguro, Auditoría…), combinándolos en un solo trabajo.
+2. **Delega por modelo** con 25 subagentes: Haiku para lo mecánico, Sonnet para escribir/revisar, Opus solo para decisiones difíciles, más especialistas por tecnología (Python, C++, Blender, juegos…).
+3. **Descubre lo que tienes instalado** (tus agentes, skills, comandos, flujos propios y servidores MCP como Blender) y usa los que encajan con lo que pides.
+
+```text
+/plugin marketplace add Ivankirito22/ClaudeOP
+/plugin install claudeop@claudeop
+```
+
+En local (sin GitHub): `/plugin marketplace add C:\ruta\a\ClaudeOP` y luego `/plugin install claudeop@claudeop`. Para probarlo sin instalar: `claude --plugin-dir C:\ruta\a\ClaudeOP\plugin`.
+
+**Cómo funciona (sin magia):** dos hooks. Al abrir la sesión (`SessionStart`) inventaría tus plugins/skills/agentes/MCP y le da a Claude las reglas de reparto (~1.4k tokens). En cada mensaje (`UserPromptSubmit`, ~90 ms, sin llamar a ningún modelo) reconoce flujos, tecnologías y recursos instalados y le añade una nota corta solo si hay trabajo de verdad: «ok», «gracias» o una pregunta no gastan nada. Quien decide delegar sigue siendo el modelo principal; la nota lo empuja, no lo obliga (en una prueba real con «opotiza mi proyecto» delegó en `explorador` y `limpiador`, que corrieron en Haiku).
+
+**Ajustes (todos opcionales):**
+- Desactivar: variable `CLAUDEOP=off`, o en la frase «sin delegar» / «no uses agentes».
+- Flujos propios: un `.md` en `~/.claude/flows/` o `.claude/flows/` con `name`, `description` y `triggers: palabra, otra frase` en la cabecera; el cuerpo son las fases. Se reconocen y se siguen solos.
+- Los agentes y flujos del plugin salen de `src/`: tras tocar `src/`, `npm run build:plugin` (y `npm test` avisa si se olvida).
+
+**Límites honestos:** reconocer flujos por palabras no entiende faltas graves («opotiza»); en ese caso la nota no los pilla y es Claude quien los deduce del catálogo de la sesión. Un plugin no puede imponer permisos: el bloqueo de `git push` es una regla en el prompt, no un cortafuegos (para eso usa `permissions.deny` en tu `settings.json`). Las skills/MCP sugeridas se eligen por palabras, así que alguna sugerencia puede no encajar; la nota dice que se ignore si no sirve.
+
+---
+
+## Panel `cla` (la app con botones)
 
 Panel con **botones de verdad** para **Claude Code**, usando tu login de Claude (sin API key). Se abre en una ventana del navegador
 (Edge/Chrome en modo aplicación), así que todo es clic. Sonnet coordina y, **dentro de la misma instrucción**, reparte el trabajo entre modelos y agentes:

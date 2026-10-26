@@ -1,0 +1,10 @@
+{
+  "name": "claudeop",
+  "version": "1.0.0",
+  "description": "Delegación automática entre modelos: al instalarlo, Claude Code reconoce lo que pides y reparte el trabajo entre Haiku/Sonnet/Opus, flujos, especialistas, skills, agentes y MCP instalados, sin comandos ni etiquetas.",
+  "author": { "name": "Ivankirito22" },
+  "homepage": "https://github.com/Ivankirito22/ClaudeOP",
+  "repository": "https://github.com/Ivankirito22/ClaudeOP",
+  "license": "MIT",
+  "keywords": ["delegation", "subagents", "workflows", "haiku", "sonnet", "opus", "orchestration"]
+}

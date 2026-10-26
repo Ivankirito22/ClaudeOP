@@ -1,7 +1,7 @@
 {
   "name": "claude-router",
   "version": "0.9.0",
-  "description": "Panel con botones para Claude Code: Sonnet coordina y reparte el trabajo entre Haiku/Sonnet/Opus dentro de cada instrucción",
+  "description": "Plugin claudeop para Claude Code (delegación automática entre Haiku/Sonnet/Opus, sin comandos) y panel opcional cla",
   "type": "module",
   "bin": {
     "cla": "./bin/cla.mjs"
@@ -9,7 +9,9 @@
   "scripts": {
     "start": "node bin/cla.mjs",
     "terminal": "node bin/cla.mjs --terminal",
-    "test": "node test/smoke.mjs",
+    "build:plugin": "node tools/build-plugin.mjs",
+    "test": "node test/plugin.mjs && node test/smoke.mjs",
+    "test:plugin": "node test/plugin.mjs --show",
     "test:web": "python3 test/web.py",
     "test:tui": "python3 test/ui-pty.py"
   },
@@ -32,6 +34,9 @@
     "bin",
     "src",
     "web",
+    "plugin",
+    ".claude-plugin",
+    "tools",
     "install.ps1",
     "install.sh",
     "README.md"
