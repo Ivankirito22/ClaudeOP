@@ -8,13 +8,19 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { riskOf } from '../plugin/scripts/guard.mjs';
+import { usageByModel } from '../plugin/scripts/track.mjs';
+import { fmt as fmtTime, range as rangeTime } from '../plugin/scripts/eta.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PLUGIN = path.join(REPO, 'plugin');
 const SHOW = process.argv.includes('--show');
 const REAL = !!process.env.CLAUDEOP_REAL;
 
-assert.equal(fs.readdirSync(path.join(PLUGIN, 'agents')).filter((f) => f.endsWith('.md')).length, 25, 'faltan agentes');
+const agents = fs.readdirSync(path.join(PLUGIN, 'agents')).filter((f) => f.endsWith('.md'));
+assert.equal(agents.length, 12, 'deben ser 12 agentes: 9 base + especialista + blender + juego');
+const descTokens = agents.reduce((n, f) => n + /^description:.*$/m.exec(fs.readFileSync(path.join(PLUGIN, 'agents', f), 'utf8'))[0].length, 0) / 3.6;
+assert.ok(descTokens < 700, `las descripciones de los agentes cuestan ${Math.round(descTokens)} tokens en cada turno`);
 // Cada hook apunta a un script que existe
 const hooks = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8')).hooks;
 for (const g of Object.values(hooks).flat()) for (const h of g.hooks) {
@@ -77,7 +83,7 @@ assert.equal(route('optimiza el proyecto', { CLAUDEOP: 'off' }), null, 'CLAUDEOP
 let t = route('opotiza mi proyecto y modela x cosa en 3d');
 show('opotiza mi proyecto y modela x cosa en 3d', t);
 assert.ok(t.includes('Feature completa'), '«modela» → Feature completa');
-assert.ok(t.includes('claudeop:<nombre>') && /blender/.test(t), 'especialista blender');
+assert.ok(t.includes('claudeop:blender'), 'especialista blender');
 assert.ok(/aunque tenga faltas de ortografía/.test(t), 'Claude completa los flujos que la regla no pilla (typo)');
 if (!REAL) assert.ok(t.includes('mcp__blender__*'), 'sugiere el MCP de Blender');
 
@@ -103,8 +109,10 @@ show('sin flujo concreto', t);
 assert.ok(t.includes('MÉTODO GENERAL') || t.includes('Flujos que encajan'), 'tarea sin flujo → método general');
 
 // ---- Requisitos: se instalan solos, una vez, y sin tocar tu Claude Code (usa un «claude» falso) ----
-const reqs = fs.readFileSync(path.join(PLUGIN, 'REQUIREMENTS.md'), 'utf8').match(/```requirements\r?\n([\s\S]*?)```/)[1].split('\n').filter((l) => l.trim());
-assert.equal(reqs.length, 4, 'REQUIREMENTS.md debe listar 4 plugins');
+const block = (kind) => fs.readFileSync(path.join(PLUGIN, 'REQUIREMENTS.md'), 'utf8').match(new RegExp('```' + kind + '\\r?\\n([\\s\\S]*?)```'))[1].split('\n').filter((l) => l.trim());
+const reqs = block('requirements');
+assert.equal(reqs.length, 2, 'REQUIREMENTS.md: 2 plugins automáticos (memoria y flujo)');
+assert.equal(block('optional').length, 2, 'REQUIREMENTS.md: 2 opcionales');
 
 const fake = path.join(tmp, 'fakebin');
 const calls = path.join(tmp, 'claude-calls.log');
@@ -121,9 +129,10 @@ const wait = async (cond) => { for (let i = 0; i < 60 && !cond(); i++) await new
 const log = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
 
 t = run('bootstrap.mjs', {}, boot);
-assert.ok(t && t.includes('pro-workflow') && t.includes('auto-harness') && t.includes('arscontexta'), 'avisa de lo que instala');
+assert.ok(t && t.includes('pro-workflow'), 'avisa de lo que instala');
 assert.ok(!t.includes('claude-mem'), 'no menciona lo que ya estaba instalado');
-await wait(() => log().includes('install arscontexta@agenticnotetaking'));
+assert.ok(!t.includes('auto-harness') && !t.includes('arscontexta'), 'los opcionales no se instalan solos');
+await wait(() => log().includes('install pro-workflow@pro-workflow'));
 for (const r of reqs.slice(1)) {
   const [repo, plugin] = r.trim().split(/\s+/);
   assert.ok(log().includes(`plugin marketplace add ${repo}`) && log().includes(`plugin install ${plugin}`), `no instaló ${plugin}`);
@@ -133,6 +142,110 @@ await wait(() => Object.values(JSON.parse(fs.readFileSync(path.join(boot.CLAUDE_
 assert.equal(run('bootstrap.mjs', {}, boot), null, 'no vuelve a instalar lo que ya instaló una vez (aunque el usuario lo quite)');
 assert.equal(run('bootstrap.mjs', {}, { ...boot, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-off'), CLAUDEOP_NO_INSTALL: '1' }), null, 'CLAUDEOP_NO_INSTALL=1 lo desactiva');
 assert.equal(run('bootstrap.mjs', {}, { CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-noclaude') }), null, 'sin «claude» en el PATH no hace nada');
+const dry = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'install-requirements.mjs'), '--dry-run', '--optional'], { encoding: 'utf8', env: { ...env, ...boot } });
+assert.equal((dry.stdout.match(/instalaría/g) || []).length, 3, '--optional suma los 2 opcionales a lo que falta (pro-workflow + 2)');
+
+// ---- Protección: confirmación antes de lo que no se deshace ----
+for (const c of ['git push', 'git push origin main --force', 'git -C ../otro push', 'git reset --hard HEAD~1', 'git clean -fd', 'git branch -D viejo', 'cd x && git push', 'rm -rf ~', 'rm -rf /', 'rm -rf *']) {
+  assert.ok(riskOf(c), `«${c}» debe pedir confirmación`);
+}
+for (const c of ['git status', 'git commit -m "arregla push de datos"', 'git log --grep push', 'git reset --soft HEAD~1', 'git clean -n', 'git branch -d hecha', 'rm -rf node_modules', 'rm fichero.txt', 'npm run build', 'echo "git push"']) {
+  assert.equal(riskOf(c), null, `«${c}» no debe molestar`);
+}
+const guardHook = (tool, ti, extra = {}, e = {}) => {
+  const r = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'guard.mjs')], { input: JSON.stringify({ session_id: 's1', prompt_id: 'p1', tool_name: tool, tool_input: ti, ...extra }), encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-guard'), ...e } });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput : null;
+};
+assert.equal(guardHook('Bash', { command: 'git push origin main' }).permissionDecision, 'ask', 'git push pide confirmación');
+assert.equal(guardHook('PowerShell', { command: 'git reset --hard' }).permissionDecision, 'ask', 'también en PowerShell');
+assert.equal(guardHook('Bash', { command: 'git push' }, {}, { CLAUDEOP_GUARD: 'off' }), null, 'CLAUDEOP_GUARD=off lo desactiva');
+assert.equal(guardHook('Bash', { command: 'ls' }), null, 'un comando normal pasa sin decir nada');
+
+// Muchas lecturas seguidas del hilo principal → un único recordatorio de delegar; los subagentes no cuentan
+const outs = Array.from({ length: 10 }, () => guardHook('Read', { file_path: 'a.js' }, { prompt_id: 'p2' }));
+assert.equal(outs.filter(Boolean).length, 1, 'un solo recordatorio por petición');
+assert.ok(outs[7]?.additionalContext.includes('claudeop:explorador'), 'salta a la 8ª lectura');
+assert.equal(Array.from({ length: 12 }, () => guardHook('Read', { file_path: 'a.js' }, { prompt_id: 'p3', agent_id: 'sub1' })).filter(Boolean).length, 0, 'las lecturas de un subagente no cuentan');
+run('route.mjs', { cwd, prompt: 'optimiza el proyecto sin delegar', prompt_id: 'p4', session_id: 's1' }, { CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-guard') });
+assert.equal(Array.from({ length: 12 }, () => guardHook('Read', { file_path: 'a.js' }, { prompt_id: 'p4' })).filter(Boolean).length, 0, '«sin delegar» también silencia el recordatorio');
+
+// ---- Medición: lee el transcript (con mensajes repetidos) y anota por modelo; stats lo resume ----
+const msg = (id, model, i, o, r, c) => JSON.stringify({ type: 'assistant', message: { id, model, usage: { input_tokens: i, output_tokens: o, cache_read_input_tokens: r, cache_creation_input_tokens: c } } });
+const tr = path.join(tmp, 'sub.jsonl');
+fs.writeFileSync(tr, [msg('m1', 'claude-haiku-5-5', 10, 200, 1000, 500), msg('m1', 'claude-haiku-5-5', 10, 200, 1000, 500), msg('m2', 'claude-haiku-5-5', 5, 100, 2000, 0), '{roto', JSON.stringify({ type: 'user' })].join('\n'));
+assert.deepEqual(usageByModel(tr), { 'claude-haiku-5-5': { i: 15, o: 300, r: 3000, c: 500 } }, 'cuenta cada mensaje una vez');
+
+const dataT = path.join(tmp, 'data-track');
+const trk = (kind, input) => assert.equal(spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'track.mjs'), kind], { input: JSON.stringify(input), encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: dataT } }).status, 0);
+const mainTr = path.join(tmp, 'main.jsonl');
+fs.writeFileSync(mainTr, msg('a1', 'claude-sonnet-5-5', 100, 400, 5000, 1000));
+trk('sub', { session_id: 's9', agent_type: 'claudeop:explorador', agent_transcript_path: tr });
+trk('main', { session_id: 's9', transcript_path: mainTr });
+fs.appendFileSync(mainTr, '\n' + msg('a2', 'claude-sonnet-5-5', 50, 100, 6000, 0));
+trk('main', { session_id: 's9', transcript_path: mainTr });
+trk('main', { session_id: 's9', transcript_path: mainTr }); // sin novedades: no duplica
+const usage = fs.readFileSync(path.join(dataT, 'usage.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+assert.equal(usage.length, 3, 'una fila del subagente y dos del hilo principal (la tercera llamada no añade)');
+assert.equal(usage.filter((u) => u.k === 'main').reduce((n, u) => n + u.o, 0), 500, 'el hilo principal suma el delta, no el acumulado');
+assert.equal(usage.find((u) => u.k === 'sub').a, 'explorador', 'quita el prefijo claudeop:');
+const stats = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'stats.mjs'), '--precios', 'haiku=1,sonnet=3'], { encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: dataT } }).stdout;
+assert.ok(/haiku\s+.*\d+%/.test(stats) && /sonnet\s+.*\d+%/.test(stats) && stats.includes('explorador') && /Coste relativo/.test(stats), `stats incompleto:\n${stats}`);
+assert.ok(spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'stats.mjs')], { encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: path.join(tmp, 'vacio') } }).stdout.includes('sin datos todavía'), 'sin registro lo dice claro');
+
+// ---- Tiempo estimado: «⏱ ~X–Y min» en cada tarea, calculado con lo que tardó de verdad ----
+assert.deepEqual([30, 300, 3900, 7200].map(fmtTime), ['30 s', '5 min', '1 h 5 min', '2 h']);
+assert.equal(rangeTime({ lo: 540, hi: 1665 }), '~9–28 min');
+assert.equal(rangeTime({ lo: 300, hi: 300 }), '~5 min');
+assert.ok(/⏱ Tiempo estimado: ~\d+(–\d+)? min \(estimación inicial/.test(route('arregla el login que falla en la app')), 'sin historial: estimación inicial');
+assert.ok(/⏱ Tiempo estimado: ~\d+–\d+ min/.test(route('refactoriza el módulo de pagos y añade tests')), 'varios flujos también');
+
+const dataE = path.join(tmp, 'data-eta');
+w(path.join(dataE, 'durations.jsonl'), [600, 700, 800, 900, 1000].map((sec) => JSON.stringify({ t: Date.now(), k: '/feature', sec })).join('\n') + '\n');
+t = run('route.mjs', { cwd, prompt: 'añade un endpoint nuevo en python con fastapi y pytest', prompt_id: 'e1', session_id: 'se' }, { CLAUDE_PLUGIN_DATA: dataE });
+assert.ok(t.includes('~12–15 min (calculado con 5 tareas parecidas tuyas)'), `debe usar el historial (p25–p75):\n${t.split('\n').find((l) => l.includes('⏱'))}`);
+
+// Al terminar (Stop) se anota cuánto tardó: simulamos que la petición empezó hace 2 minutos
+const stFile = fs.readdirSync(dataE).find((f) => f.startsWith('sess-se'));
+const st = JSON.parse(fs.readFileSync(path.join(dataE, stFile), 'utf8'));
+assert.equal(st.kind, '/feature', 'la petición queda anotada con su tipo');
+fs.writeFileSync(path.join(dataE, stFile), JSON.stringify({ ...st, t0: Date.now() - 120000 }));
+const stopMain = path.join(tmp, 'stop.jsonl');
+fs.writeFileSync(stopMain, msg('z1', 'claude-sonnet-5-5', 1, 1, 1, 1));
+const stop = () => spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'track.mjs'), 'main'], { input: JSON.stringify({ session_id: 'se', prompt_id: 'e1', transcript_path: stopMain }), encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: dataE } });
+stop(); stop(); // un segundo Stop de la misma petición no duplica
+const durs = fs.readFileSync(path.join(dataE, 'durations.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+assert.equal(durs.length, 6, 'una duración nueva (y solo una)');
+assert.ok(durs[5].k === '/feature' && durs[5].sec >= 119 && durs[5].sec <= 125, 'duración ≈ 2 min');
+const st2 = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'stats.mjs')], { encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: dataE } }).stdout;
+assert.ok(/Feature completa\s+6×/.test(st2) && st2.includes('Tiempo real por tipo de tarea'), `stats debe mostrar los tiempos:\n${st2}`);
+assert.ok(run('session-start.mjs', { cwd, source: 'startup' }).includes('⏱ ~X–Y min'), 'la regla del tiempo está en la sesión');
+
+// Subagente en segundo plano: su aviso de vuelta no es una petición nueva, y el tiempo cuenta hasta que termina todo
+const dataF = path.join(tmp, 'data-bg');
+const envF = { CLAUDE_PLUGIN_DATA: dataF };
+assert.ok(run('route.mjs', { cwd, prompt: 'limpia el código muerto de este proyecto', prompt_id: 'f1', session_id: 'sf' }, envF), 'la petición real sí lleva nota');
+const fFile = path.join(dataF, fs.readdirSync(dataF).find((f) => f.startsWith('sess-sf')));
+fs.writeFileSync(fFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(fFile, 'utf8')), t0: Date.now() - 90000 }));
+const handback = 'Another Claude session sent a message: <agent-message from="a1"> [Subagent hand-back] El bug del error está en el login </agent-message>';
+assert.equal(run('route.mjs', { cwd, prompt: handback, prompt_id: 'f2', session_id: 'sf' }, envF), null, 'el aviso de un subagente no recibe nota ni estimación');
+assert.equal(JSON.parse(fs.readFileSync(fFile, 'utf8')).kind, '/limpiar', 'ni reinicia el cronómetro de la petición real');
+const stopBg = (extra) => spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'track.mjs'), 'main'], { input: JSON.stringify({ session_id: 'sf', transcript_path: stopMain, ...extra }), encoding: 'utf8', env: { ...env, ...envF } });
+stopBg({ prompt_id: 'f1', background_tasks: [{ id: 'a1' }] });
+assert.ok(!fs.existsSync(path.join(dataF, 'durations.jsonl')), 'con un subagente aún en marcha no se cierra la medición');
+guardHook('Read', { file_path: 'x' }, { session_id: 'sf', prompt_id: 'f2' }, { CLAUDE_PLUGIN_DATA: dataF }); // la continuación no borra el cronómetro
+stopBg({ prompt_id: 'f2', background_tasks: [] });
+const bg = fs.readFileSync(path.join(dataF, 'durations.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+assert.ok(bg.length === 1 && bg[0].k === '/limpiar' && bg[0].sec >= 89, 'una sola medición, con el tiempo total desde que el usuario pidió');
+
+// ---- Estado de un trabajo largo: se retoma al abrir la sesión ----
+w(path.join(proj, '.claude', 'claudeop', 'estado.md'), 'Hecho: modelo de usuarios\nPendiente: endpoint /login');
+assert.ok(run('session-start.mjs', { cwd, source: 'resume' }).includes('Pendiente: endpoint /login'), 'retoma el estado guardado');
+
+// ---- Especialistas: solo la guía de las tecnologías que tocan ----
+t = route('añade un endpoint nuevo en python con fastapi y pytest');
+assert.ok(t.includes('claudeop:especialista') && /Python:/.test(t) && !/Go:|Rust:/.test(t), 'guía de Python en la nota, sin cargar las demás');
+assert.ok(t.includes('estado.md') || !/Feature completa/.test(t), 'trabajo largo → archivo de estado');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('plugin: todo OK');

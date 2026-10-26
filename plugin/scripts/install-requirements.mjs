@@ -1,6 +1,7 @@
 // Instala los plugins de REQUIREMENTS.md que falten.
 //   node install-requirements.mjs                 → instala los que falten
 //   node install-requirements.mjs --dry-run       → solo muestra qué haría
+//   node install-requirements.mjs --optional      → incluye también los opcionales
 //   node install-requirements.mjs --only a,b      → solo esos (lo usa el arranque automático, que además anota el resultado)
 import { readRequirements, installedIds, isInstalled, installOne, readStamp, writeStamp } from './requirements.mjs';
 
@@ -8,7 +9,8 @@ const DRY = process.argv.includes('--dry-run');
 const onlyArg = process.argv.indexOf('--only');
 const ONLY = onlyArg > 0 ? process.argv[onlyArg + 1].split(',') : null;
 
-const reqs = readRequirements().filter((r) => !ONLY || ONLY.includes(r.plugin));
+const all = [...readRequirements(), ...(process.argv.includes('--optional') ? readRequirements('optional') : [])];
+const reqs = all.filter((r) => !ONLY || ONLY.includes(r.plugin));
 const ids = installedIds() || [];
 
 let fallos = 0;

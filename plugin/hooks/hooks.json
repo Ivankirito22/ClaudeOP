@@ -4,32 +4,42 @@
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs\"",
-            "timeout": 40
-          }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.mjs\"", "timeout": 40 }
         ]
       },
       {
         "matcher": "startup",
         "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs\"",
-            "timeout": 30
-          }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs\"", "timeout": 30 }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/route.mjs\"",
-            "timeout": 10
-          }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/route.mjs\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Read|Grep|Glob",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs\"", "timeout": 5 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/track.mjs\" sub", "async": true, "timeout": 20 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/track.mjs\" main", "async": true, "timeout": 20 }
         ]
       }
     ]

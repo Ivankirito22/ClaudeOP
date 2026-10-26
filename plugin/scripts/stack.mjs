@@ -1,66 +1,67 @@
-// Detecta el tipo de proyecto (barato, sin llamar a ningún modelo) y activa SOLO los subagentes
-// especialistas que tocan: cada subagente listado cuesta tokens en cada petición, así que no cargamos los que no hacen falta.
+// Detecta el tipo de proyecto (barato, sin llamar a ningún modelo) y qué tecnologías toca una petición.
+// Cada subagente listado cuesta tokens en cada turno, así que solo Blender y juegos tienen agente propio (necesitan todas las
+// herramientas para usar su MCP); el resto comparte el agente `especialista` y recibe su guía de estilo en la nota, solo cuando toca.
 import fs from 'node:fs';
 import path from 'node:path';
 
-const EDIT = ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash'];
-
 // kw = palabras (sin tildes, en minúsculas) con las que lo reconocemos en lo que escribes; ext = extensiones que delatan el stack del proyecto.
-const spec = (tag, description, prompt, kw, ext = []) => ({ tag, description, prompt, kw, ext, model: 'sonnet', tools: EDIT });
-const STD = 'Follow the project\'s existing style, versions and conventions. Reuse what exists before writing new code. Report briefly: files changed, anything the caller must verify and the command to build/test.';
+const spec = (tag, prompt, kw, ext = []) => ({ tag, prompt, kw, ext });
 
 export const SPECIALISTS = {
-  frontend: spec('Frontend', 'Frontend specialist (mid-tier). React/Next/Vue/Svelte + TypeScript UI work: components, hooks, state, styling, accessibility, responsive layout. Edits files.',
-    `You are a senior frontend engineer (React/TypeScript and modern frameworks). Typed, accessible, responsive code; reuse existing components/hooks first. ${STD}`,
+  frontend: spec('Frontend',
+    `You are a senior frontend engineer (React/TypeScript and modern frameworks). Typed, accessible, responsive code; reuse existing components/hooks first.`,
     /\b(react|next(\.?js)?|vue|nuxt|svelte|angular|solid|typescript|tsx|jsx|hooks?|redux|zustand|componentes?|frontend|front-end)\b/, ['.tsx', '.jsx', '.vue', '.svelte']),
-  web: spec('HTML/CSS', 'HTML/CSS specialist (mid-tier). Semantic HTML, CSS/SCSS/Tailwind, flexbox/grid, animations, responsive and accessible layouts, vanilla JS in the DOM. Edits files.',
-    `You are a senior web developer focused on HTML and CSS (plus vanilla JS/DOM). Semantic markup, accessible, mobile-first, no unnecessary dependencies. ${STD}`,
+  web: spec('HTML/CSS',
+    `You are a senior web developer focused on HTML and CSS (plus vanilla JS/DOM). Semantic markup, accessible, mobile-first, no unnecessary dependencies.`,
     /\b(html5?|css3?|scss|sass|less|tailwind|bootstrap|flexbox|grid|maquet\w+|landing|responsive|dom|animacion\w*|estilos?)\b/, ['.html', '.css', '.scss', '.sass', '.less']),
-  node: spec('Node.js', 'Node.js specialist (mid-tier). Node/Express/Fastify/NestJS servers, npm packages, CLIs, streams, async patterns, ESM/CJS, build tooling. Edits files.',
-    `You are a senior Node.js engineer. Handle async errors explicitly, validate inputs, keep dependencies minimal, respect the module system (ESM/CJS) the project uses. ${STD}`,
+  node: spec('Node.js',
+    `You are a senior Node.js engineer. Handle async errors explicitly, validate inputs, keep dependencies minimal, respect the module system (ESM/CJS) the project uses.`,
     /\b(node(\.?js)?|npm|npx|pnpm|yarn|express|fastify|koa|nestjs|deno|bun|package\.json|esm|commonjs|cli en node)\b/, ['.mjs', '.cjs']),
-  backend: spec('Backend/API', 'Backend/API specialist (mid-tier). Endpoints, validation, authentication/authorization, database access, error handling, security hardening. Edits files.',
-    `You are a senior backend engineer. Validate all inputs, never trust the client, keep secrets out of code, use parameterized queries, handle errors explicitly. Report any security-relevant decision. ${STD}`,
+  backend: spec('Backend/API',
+    `You are a senior backend engineer. Validate all inputs, never trust the client, keep secrets out of code, use parameterized queries, handle errors explicitly. Report any security-relevant decision.`,
     /\b(api|apis|endpoints?|rest|graphql|backend|back-end|servidor|jwt|oauth|autenticacion|autorizacion|middleware|orm|prisma|webhooks?)\b/),
-  sql: spec('SQL/BBDD', 'Database specialist (mid-tier). SQL (Postgres/MySQL/SQLite/SQL Server), schema design, migrations, indexes, query optimization, Supabase/Prisma, MongoDB basics. Edits files.',
-    `You are a senior database engineer. Write portable, parameterized SQL; think about indexes, constraints and migrations that are safe to run on existing data. ${STD}`,
+  sql: spec('SQL/BBDD',
+    `You are a senior database engineer. Write portable, parameterized SQL; think about indexes, constraints and migrations that are safe to run on existing data.`,
     /\b(sql|postgres\w*|mysql|mariadb|sqlite|sql ?server|supabase|mongodb|mongo|base(s)? de datos|bbdd|consultas?|queries|query|migraci\w+|esquema|tablas?|indices?)\b/, ['.sql']),
-  python: spec('Python', 'Python specialist (mid-tier). Python scripts, packages, async, typing, pytest, FastAPI/Flask/Django, pandas/numpy, packaging and virtualenvs. Edits files.',
-    `You are a senior Python engineer. Idiomatic, typed where the project types, small functions, pytest for behavior changes, no new dependency without need. ${STD}`,
+  python: spec('Python',
+    `You are a senior Python engineer. Idiomatic, typed where the project types, small functions, pytest for behavior changes, no new dependency without need.`,
     /\b(python|pip|pipx|venv|django|flask|fastapi|pandas|numpy|pytest|pydantic|asyncio|jupyter|requirements\.txt|pyproject)\b/, ['.py', '.ipynb']),
-  cpp: spec('C/C++', 'C/C++ specialist (mid-tier). Modern C++ (RAII, STL, templates), C, CMake/Make builds, memory safety, performance, Unreal C++ and native libraries. Edits files.',
-    `You are a senior C/C++ engineer. Prefer RAII and the standard library, avoid raw owning pointers and undefined behavior, mind ABI/headers and the project's C++ standard. ${STD}`,
+  cpp: spec('C/C++',
+    `You are a senior C/C++ engineer. Prefer RAII and the standard library, avoid raw owning pointers and undefined behavior, mind ABI/headers and the project's C++ standard.`,
     /(\bc\+\+|\bcpp\b|\bcmake\b|\bmakefile\b|\bstl\b|\bclang\b|\bgcc\b|\bunreal\b|\bpunteros?\b|\bheader(s)?\b|\.cpp\b|\.hpp\b|\bc\/c\+\+)/, ['.cpp', '.cc', '.cxx', '.hpp', '.h', '.c']),
-  csharp: spec('C#/.NET', 'C#/.NET specialist (mid-tier). C#, .NET, ASP.NET, Entity Framework, WPF/WinForms/MAUI, LINQ, async/await, Unity C# scripts. Edits files.',
-    `You are a senior C#/.NET engineer. Use async/await correctly, nullable reference types, LINQ with care, dependency injection; in Unity avoid allocations in Update. ${STD}`,
+  csharp: spec('C#/.NET',
+    `You are a senior C#/.NET engineer. Use async/await correctly, nullable reference types, LINQ with care, dependency injection; in Unity avoid allocations in Update.`,
     /(\bc#|\bcsharp\b|\.net\b|\bdotnet\b|\basp\.?net\b|\bblazor\b|\bwpf\b|\bwinforms\b|\bmaui\b|\blinq\b|\bentity framework\b|\bmonobehaviour\b|\.cs\b|\.csproj\b|\bnuget\b)/, ['.cs', '.csproj', '.sln']),
-  java: spec('Java', 'Java/Kotlin-JVM specialist (mid-tier). Java/Spring/JavaFX/Maven/Gradle code: classes, generics, streams, JPA, JUnit, build issues. Edits files.',
-    `You are a senior Java engineer. Follow the project's package layout and Java version, prefer immutability and clear exceptions, write JUnit tests when behavior changes. ${STD}`,
+  java: spec('Java',
+    `You are a senior Java engineer. Follow the project's package layout and Java version, prefer immutability and clear exceptions, write JUnit tests when behavior changes.`,
     /\b(java|spring( boot)?|javafx|maven|gradle|jpa|hibernate|junit|jvm|jar|pom\.xml|servlets?)\b/, ['.java']),
-  go: spec('Go', 'Go specialist (mid-tier). Go modules, goroutines/channels, HTTP services, CLIs, testing, performance. Edits files.',
-    `You are a senior Go engineer. Idiomatic Go: small interfaces, explicit errors, context propagation, table-driven tests, gofmt. ${STD}`,
+  go: spec('Go',
+    `You are a senior Go engineer. Idiomatic Go: small interfaces, explicit errors, context propagation, table-driven tests, gofmt.`,
     /(\bgolang\b|\bgo mod\b|\bgoroutines?\b|\bgo build\b|\.go\b)/, ['.go']),
-  rust: spec('Rust', 'Rust specialist (mid-tier). Ownership/borrowing, traits, error handling, cargo, async (tokio), unsafe review, performance. Edits files.',
-    `You are a senior Rust engineer. Idiomatic ownership, Result-based errors, avoid unnecessary clones and unsafe, clippy-clean. ${STD}`,
+  rust: spec('Rust',
+    `You are a senior Rust engineer. Idiomatic ownership, Result-based errors, avoid unnecessary clones and unsafe, clippy-clean.`,
     /\b(rust|cargo|crates?|tokio|borrow checker|rustc|clippy)\b/, ['.rs']),
-  php: spec('PHP', 'PHP specialist (mid-tier). PHP 8, Laravel/Symfony, Composer, WordPress plugins/themes, PDO, security basics. Edits files.',
-    `You are a senior PHP engineer. Modern PHP 8 typing, prepared statements, escape output, follow the framework's conventions. ${STD}`,
+  php: spec('PHP',
+    `You are a senior PHP engineer. Modern PHP 8 typing, prepared statements, escape output, follow the framework's conventions.`,
     /\b(php|laravel|symfony|composer|wordpress|wp-content|blade|eloquent)\b/, ['.php']),
-  mobile: spec('Mobile', 'Mobile specialist (mid-tier). Android (Kotlin/Jetpack Compose), iOS (Swift/SwiftUI), Flutter/Dart, React Native: screens, navigation, lifecycle, permissions, store builds. Edits files.',
-    `You are a senior mobile engineer. Respect platform lifecycle and permissions, keep UI work off the main thread, follow the platform's design guidelines. ${STD}`,
+  mobile: spec('Mobile',
+    `You are a senior mobile engineer. Respect platform lifecycle and permissions, keep UI work off the main thread, follow the platform's design guidelines.`,
     /\b(android|kotlin|jetpack|compose|ios|swift|swiftui|xcode|flutter|dart|react native|expo|app movil|apk)\b/, ['.kt', '.swift', '.dart']),
-  shell: spec('Shell/DevOps', 'Shell/DevOps specialist (mid-tier). Bash/PowerShell/CMD scripts, Docker/compose, CI (GitHub Actions), installers, deployment, Linux/Windows setup. Edits files.',
-    `You are a senior DevOps engineer. Scripts must be safe to re-run (idempotent), quote variables, fail loudly, and work on the user's OS; never put secrets in files. ${STD}`,
+  shell: spec('Shell/DevOps',
+    `You are a senior DevOps engineer. Scripts must be safe to re-run (idempotent), quote variables, fail loudly, and work on the user's OS; never put secrets in files.`,
     /\b(bash|shell|powershell|cmd|batch|\.bat|\.sh|\.ps1|docker\w*|compose|github actions|ci\/cd|pipeline|nginx|deploy|despliegue|instalador|systemd)\b/, ['.sh', '.ps1', '.bat', 'Dockerfile']),
-  blender: spec('Blender', 'Blender/bpy specialist (mid-tier). Python scripts and add-ons, geometry nodes, materials, rigging/animation scripts, export pipelines (glTF/FBX), scene performance. Edits scripts.',
-    `You are an expert in Blender Python (bpy) and 3D pipelines. Write bpy code compatible with the project's Blender version, avoid heavy per-frame loops, prefer the data API over ops when possible, keep export settings explicit. ${STD}`,
+  blender: spec('Blender',
+    `You are an expert in Blender Python (bpy) and 3D pipelines. Write bpy code compatible with the project's Blender version, avoid heavy per-frame loops, prefer the data API over ops when possible, keep export settings explicit.`,
     /\b(blender|bpy|geometry nodes|nodos de geometria|rigg?ing|armature|add-?on|\.blend|modelo 3d|modelado 3d|malla|mesh|uv|texturas?|shader nodes|animacion 3d|3d)\b/, ['.blend']),
-  juego: spec('Videojuego', 'Game-dev specialist (mid-tier). Godot/Unity/Unreal/Phaser scripts, scenes and prefabs, game loop, physics, input, balance, performance, asset pipeline. Edits files.',
-    `You are a senior game developer. Use the engine's idioms (signals/events, scenes/prefabs, delta-time), keep per-frame work cheap, avoid allocations in hot paths, keep gameplay numbers in data, not hard-coded. ${STD}`,
+  juego: spec('Videojuego',
+    `You are a senior game developer. Use the engine's idioms (signals/events, scenes/prefabs, delta-time), keep per-frame work cheap, avoid allocations in hot paths, keep gameplay numbers in data, not hard-coded.`,
     /\b(godot|gdscript|unity|unreal|phaser|videojuegos?|juego|game ?dev|sprites?|hitbox|npc|niveles?|colisi\w+|fisicas?|bucle de juego|game loop|enemigos?|jugador)\b/, ['.gd', '.tscn', '.unity', '.prefab', '.uproject']),
 };
 
 export const SPEC_KEYS = Object.keys(SPECIALISTS);
+export const AGENT_TECHS = new Set(['blender', 'juego']); // con agente propio; el resto usa `especialista`
+// Guía de estilo de una tecnología, sin la presentación («You are a senior…») porque el agente ya la lleva
+export const guideFor = (keys) => keys.filter((k) => SPECIALISTS[k]).map((k) => `- ${SPECIALISTS[k].tag}: ${SPECIALISTS[k].prompt.replace(/^You are [^.]*\.\s*/, '')}`).join('\n');
 const nrm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 // Qué especialistas tocan según lo que escribes (por palabras clave)
 export const specialistsFor = (text) => SPEC_KEYS.filter((k) => SPECIALISTS[k].kw.test(nrm(text)));

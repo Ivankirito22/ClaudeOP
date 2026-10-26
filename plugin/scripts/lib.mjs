@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { detectStack, SPEC_KEYS } from './stack.mjs';
+import { detectStack } from './stack.mjs';
 import { norm } from './intent.mjs';
 
 export const NAME = 'claudeop';
@@ -58,7 +58,7 @@ const STOP = new Set(('de la el los las un una unos unas y o u e a en con por pa
 
 const stem = (w) => (w.length > 5 ? w.slice(0, 5) : w);
 const words = (s) => norm(s).split(/[^a-z0-9]+/).filter((w) => (w.length >= 3 || /\d/.test(w)) && !STOP.has(w));
-export const stems = (s) => [...new Set(words(s).map(stem))];
+const stems = (s) => [...new Set(words(s).map(stem))];
 
 // Español → raíces inglesas, porque casi todas las descripciones de agentes/skills están en inglés
 const EXPAND = {
@@ -199,7 +199,20 @@ function customFlows(cwd) {
 // ---------- Catálogo (se construye al abrir la sesión y se reutiliza en cada mensaje) ----------
 const cacheFile = (cwd) => path.join(DATA, `catalog-${crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 12)}.json`);
 
-export function buildCatalog(cwd) {
+// Última modificación de los ficheros donde Claude Code anota qué plugins hay y cuáles están activos
+function configStamp(cwd) {
+  const files = [path.join(CFG, 'settings.json'), path.join(CFG, 'plugins', 'known_marketplaces.json'), path.join(CFG, 'plugins', 'blocklist.json'),
+    path.join(CFG, 'plugins'), path.join(cwd, '.claude', 'settings.json'), path.join(cwd, '.claude', 'settings.local.json')];
+  return Math.max(0, ...files.map((f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }));
+}
+
+// maxAge > 0: reutiliza el catálogo de ese proyecto si es más reciente que maxAge (ms) y no ha cambiado la configuración de plugins
+// desde que se hizo. Así se evita la llamada a la CLI de Claude (~1 s) en casi todas las sesiones.
+export function buildCatalog(cwd, maxAge = 0) {
+  if (maxAge) {
+    const c = readJson(cacheFile(cwd));
+    if (c && c.v === 2 && Date.now() - c.built < maxAge && c.built > configStamp(cwd)) return c;
+  }
   const plugins = listPlugins().map((p) => ({ ...p, name: pluginName(p) })).filter((p) => p.name !== NAME);
   const seen = new Set();
   const items = [];
@@ -281,5 +294,3 @@ export function rankMcp(servers, q, qw = []) {
   });
 }
 
-export const dataDir = DATA;
-export { SPEC_KEYS };

@@ -113,7 +113,6 @@ Termina con: qué hace ya, archivos tocados, resultado de tests y lo que quede p
 3. Si la causa NO es evidente tras el depurador, pide a arquitecto que la confirme y proponga el arreglo.
 4. ARREGLAR — cambio mínimo en la causa raíz (no en el síntoma). Escribe un test de regresión que falle antes y pase después.
 5. COMPROBAR — probador (el test nuevo + la suite) y revisor sobre el diff, en paralelo.
-6. Apunta UNA línea de lección en .claude/lecciones.md (qué lo causó y cómo evitarlo).
 Termina con: causa raíz, arreglo, test añadido y resultado (máx. 8 líneas).`,
   },
   {

@@ -6,7 +6,7 @@ export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replac
 // weak: solo cuenta si aparece al principio de una frase de 6+ palabras que no es pregunta (verbos muy genéricos: "haz", "añade"…; así un cambio pequeño no dispara un flujo grande)
 const P = (re, weak = false) => ({ re, weak });
 
-export const PATTERNS = {
+const PATTERNS = {
   '/rendimiento': [P(/\b(rendimiento|performance|cuellos? de botella|bottlenecks?|va lento|esta lento|muy lento|lag|fps|tarda (mucho|demasiado))\b/)],
   '/optimizar': [P(/\boptimi[zc]\w*/), P(/\bmejora(r|me)? (el |la |todo el )?(codigo|proyecto|calidad)/)],
   '/limpiar': [P(/(codigo muerto|dead code|sin usar|no usad[oa]s?)/), P(/\blimpia(r)? (el )?(codigo|proyecto|imports)/)],
@@ -46,7 +46,7 @@ const SUPERSEDES = {
 
 // Orden de trabajo: primero lo que construye, luego lo que comprueba, al final la release
 const RANK = ['/feature', '/bugprofundo', '/refactor', '/decidir', '/investigar', '/limpiar', '/optimizar', '/rendimiento', '/tests', '/documentar', '/md', '/plugins', '/explicar', '/probar', '/revisar', '/seguridad', '/auditoria', '/pulir', '/release'];
-export const rank = (cmd) => { const i = RANK.indexOf(cmd); return i < 0 ? 50 : i; };
+const rank = (cmd) => { const i = RANK.indexOf(cmd); return i < 0 ? 50 : i; };
 
 export const MAX_FLOWS = 4;
 
@@ -72,9 +72,9 @@ export function detectCmds(text) {
 }
 
 // Cada flujo en una línea, para que el modelo principal también reconozca los que no pillamos con palabras
-export const FLOW_CATALOG = `Known workflows (the user's buttons). When a request resembles one, even if worded differently, follow that workflow's phases instead of improvising. For requests none of them covers (e.g. "create a model of X and optimize it"), still apply the same pattern: state the done criterion, explorador in parallel with investigador, plan with arquitecto only if hard, implement, probador + revisor in parallel, fix, verify; and if the user also asks to optimize/polish/clean, finish with an optimization pass (limpiador for mechanical cleanup, arquitecto only for hard performance decisions).
+export const FLOW_CATALOG = `Known workflows. When a request resembles one, even if worded differently, follow that workflow's phases instead of improvising. For requests none of them covers (e.g. "create a model of X and optimize it"), still apply the same pattern: state the done criterion, explorador in parallel with investigador, plan with arquitecto only if hard, implement, probador + revisor in parallel, fix, verify; and if the user also asks to optimize/polish/clean, finish with an optimization pass (limpiador for mechanical cleanup, arquitecto only for hard performance decisions).
 - Feature completa: done criterion → explorador+investigador (parallel) → arquitecto plan if 3+ files → implement → probador+revisor (parallel) → fix → documentador → verificador.
-- Bug a fondo: probador reproduces → explorador+depurador (parallel) → arquitecto if cause unclear → minimal fix + regression test → probador+revisor → one lesson line.
+- Bug a fondo: probador reproduces → explorador+depurador (parallel) → arquitecto if cause unclear → minimal fix + regression test → probador+revisor.
 - Refactor seguro: baseline tests → impact map → plan → small steps with tests between → revisor+verificador.
 - Optimizar proyecto / Limpiar código muerto: explorador finds dead code and hotspots → limpiador fixes mechanical things → arquitecto only for hard calls → probador at the end.
 - Cazar cuellos de botella: locate and measure in parallel → arquitecto ranks by impact/effort → apply the safe ones.
