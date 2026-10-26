@@ -20,6 +20,7 @@ En local (sin GitHub): `/plugin marketplace add C:\ruta\a\ClaudeOP` y luego `/pl
 **Ajustes (todos opcionales):**
 - Desactivar: variable `CLAUDEOP=off`, o en la frase «sin delegar» / «no uses agentes».
 - Flujos propios: un `.md` en `~/.claude/flows/` o `.claude/flows/` con `name`, `description` y `triggers: palabra, otra frase` en la cabecera; el cuerpo son las fases. Se reconocen y se siguen solos.
+- Plugins recomendados (Claude-Mem, Pro Workflow, Auto Harness, Ars Contexta): están en `plugin/REQUIREMENTS.md`, como un `requirements.txt`. Dile a Claude «instala los requisitos de claudeop» o ejecuta `node plugin/scripts/install-requirements.mjs` (`--dry-run` para solo ver qué haría).
 - Los agentes y flujos del plugin salen de `src/`: tras tocar `src/`, `npm run build:plugin` (y `npm test` avisa si se olvida).
 
 **Límites honestos:** reconocer flujos por palabras no entiende faltas graves («opotiza»); en ese caso la nota no los pilla y es Claude quien los deduce del catálogo de la sesión. Un plugin no puede imponer permisos: el bloqueo de `git push` es una regla en el prompt, no un cortafuegos (para eso usa `permissions.deny` en tu `settings.json`). Las skills/MCP sugeridas se eligen por palabras, así que alguna sugerencia puede no encajar; la nota dice que se ignore si no sirve.
