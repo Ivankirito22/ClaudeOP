@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import { USAGE, tierOf } from './data.mjs';
 import { readDurations, spread, fmt as fmtTime } from './eta.mjs';
-import { ACTIONS } from './actions.mjs';
+import { FLOWS } from './flows.mjs';
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : null; };
 const flag = (n) => process.argv.includes(n);
@@ -55,7 +55,7 @@ if (precios && total) {
 
 // Tiempos reales por tipo de tarea (los que usa la estimación «⏱ ~X–Y min»)
 const durs = readDurations(since);
-const label = (k) => k.split('+').map((c) => ACTIONS.find((a) => a.cmd === c)?.label || (c === 'propio' ? 'Flujo propio' : c === 'general' ? 'Método general' : c)).join(' + ');
+const label = (k) => k.split('+').map((c) => FLOWS.find((a) => a.cmd === c)?.label || (c === 'propio' ? 'Flujo propio' : c === 'general' ? 'Método general' : c)).join(' + ');
 const times = [...new Set(durs.map((d) => d.k))].map((k) => {
   const all = durs.filter((d) => d.k === k).map((d) => d.sec).sort((a, b) => a - b);
   const sp = spread(durs, k);

@@ -20,7 +20,7 @@ const REAL = !!process.env.CLAUDEOP_REAL;
 const agents = fs.readdirSync(path.join(PLUGIN, 'agents')).filter((f) => f.endsWith('.md'));
 assert.equal(agents.length, 12, 'deben ser 12 agentes: 9 base + especialista + blender + juego');
 const descTokens = agents.reduce((n, f) => n + /^description:.*$/m.exec(fs.readFileSync(path.join(PLUGIN, 'agents', f), 'utf8'))[0].length, 0) / 3.6;
-assert.ok(descTokens < 700, `las descripciones de los agentes cuestan ${Math.round(descTokens)} tokens en cada turno`);
+assert.ok(descTokens < 450, `las descripciones de los agentes cuestan ${Math.round(descTokens)} tokens en cada turno`);
 // Cada hook apunta a un script que existe
 const hooks = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8')).hooks;
 for (const g of Object.values(hooks).flat()) for (const h of g.hooks) {
@@ -62,12 +62,12 @@ const show = (title, t) => { if (SHOW) console.log(`\n=== ${title}\n${t == null 
 const session = run('session-start.mjs', { cwd, source: 'startup' });
 show('SessionStart', session);
 assert.ok(session.includes('claudeop:<nombre>'), 'la sesión debe explicar cómo llamar a los agentes');
-assert.ok(/haiku \(barato\): .*explorador/.test(session) && /opus \(caro\): arquitecto/.test(session), 'reparto por modelo');
+assert.ok(/haiku \(barato\) [^·]*explorador/.test(session) && /opus \(caro\) arquitecto/.test(session), 'reparto por modelo');
 assert.ok(tok(session) < 2200, `la sesión pesa demasiado (${tok(session)} tokens)`);
 if (!REAL) {
   assert.ok(session.includes('mcp__blender__'), 'debe conocer el MCP de Blender del usuario');
   assert.ok(session.includes('Lanzamiento de juego'), 'debe conocer los flujos propios');
-  assert.ok(/Stack del proyecto: .*Python/.test(session), 'debe detectar el stack');
+  assert.ok(/Stack: .*Python/.test(session), 'debe detectar el stack');
 }
 
 // ---- Mensajes que NO deben gastar nada ----
@@ -106,7 +106,7 @@ if (!REAL) assert.ok(t.includes('Lanzamiento de juego (flujo propio)') && t.incl
 
 t = route('necesito algo para mejorar la organización de mi equipo y planificar la semana de trabajo');
 show('sin flujo concreto', t);
-assert.ok(t.includes('MÉTODO GENERAL') || t.includes('Flujos que encajan'), 'tarea sin flujo → método general');
+assert.ok(t.includes('método general') || t.includes('Flujos:'), 'tarea sin flujo → método general');
 
 // ---- Requisitos: se instalan solos, una vez, y sin tocar tu Claude Code (usa un «claude» falso) ----
 const block = (kind) => fs.readFileSync(path.join(PLUGIN, 'REQUIREMENTS.md'), 'utf8').match(new RegExp('```' + kind + '\\r?\\n([\\s\\S]*?)```'))[1].split('\n').filter((l) => l.trim());
@@ -197,13 +197,13 @@ assert.ok(spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'stats.mjs')
 assert.deepEqual([30, 300, 3900, 7200].map(fmtTime), ['30 s', '5 min', '1 h 5 min', '2 h']);
 assert.equal(rangeTime({ lo: 540, hi: 1665 }), '~9–28 min');
 assert.equal(rangeTime({ lo: 300, hi: 300 }), '~5 min');
-assert.ok(/⏱ Tiempo estimado: ~\d+(–\d+)? min \(estimación inicial/.test(route('arregla el login que falla en la app')), 'sin historial: estimación inicial');
-assert.ok(/⏱ Tiempo estimado: ~\d+–\d+ min/.test(route('refactoriza el módulo de pagos y añade tests')), 'varios flujos también');
+assert.ok(/⏱ Estimado ~\d+(–\d+)? min \(estimación inicial/.test(route('arregla el login que falla en la app')), 'sin historial: estimación inicial');
+assert.ok(/⏱ Estimado ~\d+–\d+ min/.test(route('refactoriza el módulo de pagos y añade tests')), 'varios flujos también');
 
 const dataE = path.join(tmp, 'data-eta');
 w(path.join(dataE, 'durations.jsonl'), [600, 700, 800, 900, 1000].map((sec) => JSON.stringify({ t: Date.now(), k: '/feature', sec })).join('\n') + '\n');
 t = run('route.mjs', { cwd, prompt: 'añade un endpoint nuevo en python con fastapi y pytest', prompt_id: 'e1', session_id: 'se' }, { CLAUDE_PLUGIN_DATA: dataE });
-assert.ok(t.includes('~12–15 min (calculado con 5 tareas parecidas tuyas)'), `debe usar el historial (p25–p75):\n${t.split('\n').find((l) => l.includes('⏱'))}`);
+assert.ok(t.includes('~12–15 min (con 5 tareas parecidas tuyas)'), `debe usar el historial (p25–p75):\n${t.split('\n').find((l) => l.includes('⏱'))}`);
 
 // Al terminar (Stop) se anota cuánto tardó: simulamos que la petición empezó hace 2 minutos
 const stFile = fs.readdirSync(dataE).find((f) => f.startsWith('sess-se'));
@@ -246,6 +246,19 @@ assert.ok(run('session-start.mjs', { cwd, source: 'resume' }).includes('Pendient
 t = route('añade un endpoint nuevo en python con fastapi y pytest');
 assert.ok(t.includes('claudeop:especialista') && /Python:/.test(t) && !/Go:|Rust:/.test(t), 'guía de Python en la nota, sin cargar las demás');
 assert.ok(t.includes('estado.md') || !/Feature completa/.test(t), 'trabajo largo → archivo de estado');
+
+// ---- Diagnóstico: un entorno sano sale en verde ----
+const doc = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'doctor.mjs')], { encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-doctor') } });
+assert.equal(doc.status, 0, `doctor debe salir en verde:\n${doc.stdout}`);
+assert.ok(doc.stdout.includes('12 agentes') && doc.stdout.includes('9 hooks en 7 eventos') && doc.stdout.includes('Todo correcto'), 'doctor resume el plugin');
+
+// ---- Flujos: todo lo que detecta la intención tiene su receta, y cada receta es corta ----
+const { FLOWS } = await import('../plugin/scripts/flows.mjs');
+const { detectCmds } = await import('../plugin/scripts/intent.mjs');
+for (const p of ['optimiza el proyecto', 'arregla el login', 'refactoriza esto', 'revisa la seguridad', 'prepara la release', 'audita todo', 'documenta el código', 'investiga qué framework usar', 'cuellos de botella', 'limpia el código muerto', 'genera tests', 'explícame el proyecto', 'pule lo último']) {
+  for (const c of detectCmds(p)) assert.ok(FLOWS.some((f) => f.cmd === c), `«${p}» detecta ${c}, que no tiene receta`);
+}
+assert.ok(FLOWS.every((f) => f.body.length < 900), 'las recetas deben ser cortas: se pagan en tokens cada vez que se usan');
 
 // ---- Avisos del sistema: solo cuando Claude te necesita o termina algo largo (el log sustituye al toast real) ----
 const nlog = path.join(tmp, 'notify.log');

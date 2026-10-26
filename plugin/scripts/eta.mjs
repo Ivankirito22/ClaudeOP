@@ -13,7 +13,7 @@ const PRIORS = {
   '/feature': [480, 1500], '/bugprofundo': [300, 900], '/refactor': [480, 1500], '/decidir': [180, 480], '/auditoria': [300, 900],
   '/pulir': [180, 420], '/rendimiento': [300, 900], '/release': [180, 420], '/optimizar': [240, 720], '/limpiar': [120, 360],
   '/md': [90, 240], '/explicar': [60, 180], '/probar': [60, 240], '/tests': [240, 720], '/documentar': [120, 420],
-  '/bug': [180, 600], '/revisar': [120, 360], '/seguridad': [240, 720], '/commit': [30, 90], '/investigar': [90, 300],
+  '/revisar': [120, 360], '/seguridad': [240, 720], '/investigar': [90, 300],
   propio: [300, 900], general: [180, 600],
 };
 

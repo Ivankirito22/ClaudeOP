@@ -1,8 +1,8 @@
 // Hook UserPromptSubmit: lee lo que escribe el usuario, reconoce flujos, especialistas, MCP, skills y agentes que encajan
 // y se lo pasa a Claude como contexto. No bloquea ni cambia el mensaje. Preguntas y cambios pequeños: no añade nada.
 import fs from 'node:fs';
-import { ACTIONS } from './actions.mjs';
-import { detectCmds, bodyOf, norm, MAX_FLOWS, GENERAL } from './intent.mjs';
+import { FLOWS, GENERAL } from './flows.mjs';
+import { detectCmds, norm, MAX_FLOWS } from './intent.mjs';
 import { specialistsFor, SPEC_KEYS, AGENT_TECHS, SPECIALISTS, guideFor } from './stack.mjs';
 import { NAME, loadCatalog, queryStems, queryWords, rankItems, rankMcp } from './lib.mjs';
 import { writeJson, sessionFile } from './data.mjs';
@@ -14,14 +14,14 @@ const SKIP_FLOWS = new Set(['/plugins']); // «el plugin» aquí casi siempre es
 const EDIT_FLOWS = new Set(['/feature', '/bugprofundo', '/refactor', '/tests', '/optimizar', '/limpiar', '/rendimiento']);
 const ACTION_WORD = /\b(cre\w+|haz\w*|hac\w+|arregl\w+|cambi\w+|anad\w+|agreg\w+|modific\w+|elimin\w+|borr\w+|implement\w+|constru\w+|gener\w+|escrib\w+|program\w+|desarroll\w+|model\w+|disen\w+|optimi\w+|mejor\w+|refactor\w+|migr\w+|instal\w+|conect\w+|prepar\w+|mont\w+|analiz\w+|planific\w+|calcul\w+|convert\w+|traduc\w+|redact\w+|document\w+|investig\w+|busc\w+|compar\w+|revis\w+|audit\w+|limpi\w+|pul\w+|prueb\w+|ejecut\w+|lanz\w+|desplieg\w+|build|fix|add|write|make|update|remove|delete|create|generate|design|improve|analy\w+|plan|render\w*|anim\w+)\b/;
 const INTERNAL = /^Another Claude session sent a message|<agent-message[\s>]|\[Subagent hand-back\]|^<task-notification/;
-const NO_DELEGATE =/\b(sin delegar|no delegues|sin agentes|no uses (agentes|subagentes)|hazlo tu (solo|mismo))\b/;
+const NO_DELEGATE = /\b(sin delegar|no delegues|sin agentes|no uses (agentes|subagentes)|hazlo tu (solo|mismo))\b/;
 
 const cut = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
 function resourceLines(servers, skills, agents) {
   return [
-    'Instalado en esta máquina y relacionado con la petición (úsalo si encaja de verdad, si no ignóralo):',
-    ...servers.map((m) => `- MCP \`${m.name}\`: sus herramientas son \`${m.prefix}*\`. Úsalas tú directamente (si salen diferidas, cárgalas con ToolSearch).`),
+    'Instalado aquí y relacionado (úsalo solo si encaja de verdad):',
+    ...servers.map((m) => `- MCP \`${m.name}\`: sus herramientas son \`${m.prefix}*\`. Úsalas tú (si salen diferidas, cárgalas con ToolSearch).`),
     ...skills.map((s) => `- Skill \`${s.id}\` (herramienta Skill): ${cut(s.d, 100)}`),
     ...agents.map((a) => `- Agente \`${a.id}\` (subagent_type): ${cut(a.d, 100)}`),
   ];
@@ -53,7 +53,7 @@ function main() {
   // Flujos: los conocidos por palabras (los demás los reconoce Claude con el catálogo de la sesión, incluso con faltas)
   // (una pregunta tipo «¿cómo se modela un cubo?» no es «construye algo»: sin Feature completa)
   const known = detectCmds(prompt).filter((c) => !SKIP_FLOWS.has(c) && !(question && c === '/feature')).slice(0, Math.min(MAX_FLOWS, 3));
-  const flows = known.map((c) => ACTIONS.find((a) => a.cmd === c)).filter(Boolean);
+  const flows = known.map((c) => FLOWS.find((a) => a.cmd === c)).filter(Boolean);
 
   const cat = loadCatalog(cwd);
   const q = queryStems(prompt);
@@ -86,26 +86,21 @@ function main() {
   startState({ kind: [...kinds].sort().join('+') });
   const eta = estimate(kinds);
 
-  const lines = [`[${NAME} · automático] Esto es una tarea: aplica el método sin que el usuario lo pida y delega según las reglas de la sesión.`,
-    `⏱ Tiempo estimado: ${range(eta)} (${eta.source === 'historial' ? `calculado con ${eta.n} tareas parecidas tuyas` : 'estimación inicial; se afina sola con tu uso'}). Antes de empezar díselo al usuario en UNA línea con ese formato («⏱ ~X–Y min») y corrígelo si la tarea es claramente más grande o más pequeña de lo normal.`];
+  const lines = [
+    `[${NAME} · automático] Tarea: aplica el método y delega según las reglas de la sesión.`,
+    `⏱ Estimado ${range(eta)} (${eta.source === 'historial' ? `con ${eta.n} tareas parecidas tuyas` : 'estimación inicial; se afina con tu uso'}). Díselo al usuario en UNA línea («⏱ ~X–Y min») antes de empezar; corrígelo si la tarea es claramente mayor o menor.`,
+  ];
 
   if (maybeCode) {
-    lines.push('Flujo posible: Feature completa, pero SOLO si la petición implica escribir o cambiar código del proyecto; si no, usa directamente lo instalado que se indica abajo.');
+    lines.push('Posible flujo: Feature completa, pero SOLO si hay que escribir o cambiar código del proyecto; si no, usa lo instalado que se indica abajo.');
   } else if (flows.length || own.length) {
     const labels = [...flows.map((a) => a.label), ...own.map((f) => f.label)];
-    lines.push(`Flujos que encajan: ${labels.join(' + ')}. Síguelos anunciando cada fase en una línea.`);
-    if (labels.length > 1) {
-      lines.push('Combínalos en UN solo trabajo: un solo explorador para todo, el paralelismo de cada flujo se mantiene, UN verificador al final, y los de solo lectura (revisión/auditoría) van DESPUÉS de implementar.');
-    }
-    for (const a of flows) {
-      const body = bodyOf(a, '');
-      lines.push(`### ${a.label}\n${body}`);
-    }
-    for (const f of own) lines.push(`### ${f.label} (flujo propio)\n${f.body}`);
+    lines.push(`Flujos: ${labels.join(' + ')}${labels.length > 1 ? ' — combínalos en UN solo trabajo (un explorador, UN verificador al final, lo de solo lectura después de implementar)' : ''}. Anuncia cada fase en una línea. Si nombra además otros flujos del catálogo (aunque tenga faltas de ortografía), añádelos.`);
+    for (const a of flows) lines.push(`- ${a.label}: ${a.body}`);
+    for (const f of own) lines.push(`- ${f.label} (flujo propio): ${f.body}`);
   } else {
-    lines.push(`No encaja un flujo concreto: usa el método general.\n${GENERAL.wrap('(la petición del usuario está arriba)')}`);
+    lines.push(`Sin flujo concreto, método general: ${GENERAL.body}`);
   }
-  if (!maybeCode) lines.push('Si la petición nombra además otros flujos del catálogo (aunque tenga faltas de ortografía), añádelos.');
 
   // Especialistas: por lo que escribe; si no dice ninguna tecnología y va a editar, los 2 del proyecto
   let techs = specialistsFor(prompt).filter((k) => SPEC_KEYS.includes(k)).slice(0, 3);
@@ -114,12 +109,12 @@ function main() {
   const shared = techs.filter((k) => !AGENT_TECHS.has(k));
   if (dedicated.length) lines.push(`Especialistas con agente propio: ${dedicated.map((k) => `\`${NAME}:${k}\``).join(', ')}.`);
   if (shared.length) {
-    lines.push(`Para implementar en ${shared.map((k) => SPECIALISTS[k].tag).join(', ')} delega en \`${NAME}:especialista\` y pégale en el prompt esta guía de estilo:\n${guideFor(shared)}`);
+    lines.push(`Para ${shared.map((k) => SPECIALISTS[k].tag).join(', ')} delega en \`${NAME}:especialista\` pegándole esta guía:\n${guideFor(shared)}`);
   }
 
   // Trabajo largo: el estado en un archivo sobrevive a /compact, a un reinicio y se comparte entre fases y agentes
   if (flows.some((a) => EDIT_FLOWS.has(a.cmd) || a.cmd === '/release') || flows.length > 1) {
-    lines.push('Si el trabajo tiene 3+ pasos, mantén `.claude/claudeop/estado.md` (máx. 15 líneas: criterio de «hecho» · hecho · pendiente), actualízalo al acabar cada fase y bórralo al terminar. Al reanudar, léelo primero.');
+    lines.push('Si son 3+ pasos, mantén `.claude/claudeop/estado.md` (≤15 líneas: criterio de «hecho» · hecho · pendiente), actualízalo por fase y bórralo al acabar; al reanudar, léelo primero.');
   }
 
   if (resources) lines.push(...resourceLines(servers, skills, agents));

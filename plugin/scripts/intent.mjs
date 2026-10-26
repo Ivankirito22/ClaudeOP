@@ -1,5 +1,4 @@
-// Reconoce, en lo que escribes con tus palabras, los flujos que ya existen ("optimiza el código" → Optimizar proyecto)
-// y compone varias acciones en UNA sola instrucción. Todo local y gratis: no llama a ningún modelo.
+// Reconoce, en lo que escribes, los flujos que encajan ("optimiza el código" → Optimizar proyecto). Todo local y gratis: no llama a ningún modelo.
 
 export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -70,39 +69,3 @@ export function detectCmds(text) {
   }
   return [...found].sort((a, b) => rank(a) - rank(b));
 }
-
-// Cada flujo en una línea, para que el modelo principal también reconozca los que no pillamos con palabras
-export const FLOW_CATALOG = `Known workflows. When a request resembles one, even if worded differently, follow that workflow's phases instead of improvising. For requests none of them covers (e.g. "create a model of X and optimize it"), still apply the same pattern: state the done criterion, explorador in parallel with investigador, plan with arquitecto only if hard, implement, probador + revisor in parallel, fix, verify; and if the user also asks to optimize/polish/clean, finish with an optimization pass (limpiador for mechanical cleanup, arquitecto only for hard performance decisions).
-- Feature completa: done criterion → explorador+investigador (parallel) → arquitecto plan if 3+ files → implement → probador+revisor (parallel) → fix → documentador → verificador.
-- Bug a fondo: probador reproduces → explorador+depurador (parallel) → arquitecto if cause unclear → minimal fix + regression test → probador+revisor.
-- Refactor seguro: baseline tests → impact map → plan → small steps with tests between → revisor+verificador.
-- Optimizar proyecto / Limpiar código muerto: explorador finds dead code and hotspots → limpiador fixes mechanical things → arquitecto only for hard calls → probador at the end.
-- Cazar cuellos de botella: locate and measure in parallel → arquitecto ranks by impact/effort → apply the safe ones.
-- Auditoría completa / Revisión / Seguridad: read-only, reviewers in parallel → prioritized list.
-- Pulir lo último: second pass on what just changed: revisor+probador → fix → verificador.
-- Investigar y decidir: one investigador per option (parallel) → arquitecto compares against THIS project.
-- Preparar release: tests + changes in parallel → risks → changelog → proposed version (never push).`;
-
-// ---------- Componer acciones + texto en una sola instrucción ----------
-export function bodyOf(a, text) {
-  if (a.wrap) return a.wrap(text || '(la petición del usuario está arriba)');
-  if (a.prompt) return a.prompt;
-  return text || '';
-}
-
-// Para lo que no encaja con ningún flujo pero es un trabajo de verdad: el método completo, igualmente
-export const GENERAL = {
-  cmd: '/general',
-  label: 'Método general',
-  wrap: (t) => `MÉTODO GENERAL (esta petición no encaja con un flujo concreto; aplica igualmente el método de trabajo completo). Petición: ${t}
-
-1. Criterio de "hecho": 1-2 líneas.
-2. ENTENDER — en PARALELO: explorador mapea lo relacionado (si hay código o archivos) e investigador busca documentación solo si hace falta una API/librería que no conoces.
-3. PLANIFICAR — arquitecto solo si es grande o tiene decisiones difíciles (3+ archivos, algoritmos, diseño); si no, un plan de 3 líneas tuyo.
-4. HACER — implementa tú (o el especialista del stack si es grande); lo mecánico (renombres, boilerplate, borrar lo muerto) a limpiador. No hagas tú lo que un agente barato hace igual de bien.
-5. COMPROBAR — en PARALELO: probador (tests/build/lint, solo fallos) y revisor (revisa el diff).
-6. OPTIMIZAR — una pasada corta sobre lo que acabas de tocar: código muerto, duplicados, cuellos de botella evidentes (limpiador; arquitecto solo si hay una decisión de rendimiento difícil).
-7. VERIFICAR — verificador contra el criterio de "hecho" si el cambio toca más de 2 archivos o es arriesgado.
-Si la petición es solo de análisis o planificación (no hay que tocar archivos), salta 4-7 y entrega el análisis o el plan (con arquitecto si es difícil).
-Termina con: qué hiciste, archivos tocados, resultado de tests y pendientes (máx. 10 líneas).`,
-};
