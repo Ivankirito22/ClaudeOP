@@ -22,7 +22,7 @@ Termina con una lista corta de lo que cambiaste y de lo que recomiendas hacer ap
   {
     cmd: '/md',
     label: 'Crear/actualizar CLAUDE.md',
-    prompt: `Crea o actualiza CLAUDE.md en la raíz SIN tocar el bloque entre <!-- claude-router:start --> y <!-- claude-router:end -->. Añade: descripción en 2 líneas, comandos de build/test/run, estructura de carpetas importante, convenciones y trampas conocidas. Máximo ~60 líneas, directo, para que las próximas sesiones gasten menos tokens entendiendo el proyecto. Usa explorador para leer el repo.`,
+    prompt: `Crea o actualiza CLAUDE.md en la raíz. Añade: descripción en 2 líneas, comandos de build/test/run, estructura de carpetas importante, convenciones y trampas conocidas. Máximo ~60 líneas, directo, para que las próximas sesiones gasten menos tokens entendiendo el proyecto. Usa explorador para leer el repo.`,
   },
   {
     cmd: '/explicar',
@@ -180,30 +180,4 @@ En PARALELO: revisor (bugs, casos límite, legibilidad) y probador (tests/build/
     flow: true,
     prompt: `FLUJO «Preparar release» (NO hagas push ni tags). 1) En PARALELO: probador (tests, build y lint) y explorador (cambios desde el último tag o los últimos 20 commits). 2) revisor: riesgos de esos cambios. 3) documentador: entrada de CHANGELOG (o README si no hay) agrupada en Añadido/Cambiado/Arreglado. 4) Propón número de versión (semver) con el motivo y un mensaje de commit. Termina con un checklist de lo que falta para publicar.`,
   },
-  {
-    cmd: '/condensar',
-    label: 'Condensar lecciones',
-    group: 'MEMORIA',
-    main: 'haiku',
-    prompt: `Lee .claude/lecciones.md. Une duplicados, elimina lo obsoleto y deja como máximo 30 líneas (una por lección, máx. 120 caracteres, las más útiles primero). Reescribe el archivo conservando la cabecera. Dime cuántas había y cuántas quedan.`,
-  },
-  {
-    cmd: '/rapido',
-    label: 'Pregunta rápida (Haiku)',
-    input: true,
-    prefill: '',
-    main: 'haiku',
-    hint: 'Pregunta rápida: la siguiente instrucción irá entera con Haiku.',
-  },
-  {
-    cmd: '/profundo',
-    label: 'Pensar a fondo (Opus)',
-    input: true,
-    prefill: '',
-    main: 'opus',
-    hint: 'Pensar a fondo: la siguiente instrucción irá entera con Opus.',
-  },
 ];
-
-// Texto final de una acción con campo de texto: si tiene `wrap`, envuelve lo que escribas en el flujo.
-export const buildActionPrompt = (a, typed) => (a.wrap ? a.wrap(typed) : typed);

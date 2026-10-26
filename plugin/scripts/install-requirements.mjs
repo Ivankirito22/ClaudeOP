@@ -1,32 +1,24 @@
-// Lee el bloque ```requirements de REQUIREMENTS.md e instala los plugins que falten.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+// Instala los plugins de REQUIREMENTS.md que falten.
+//   node install-requirements.mjs                 → instala los que falten
+//   node install-requirements.mjs --dry-run       → solo muestra qué haría
+//   node install-requirements.mjs --only a,b      → solo esos (lo usa el arranque automático, que además anota el resultado)
+import { readRequirements, installedIds, isInstalled, installOne, readStamp, writeStamp } from './requirements.mjs';
 
 const DRY = process.argv.includes('--dry-run');
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'REQUIREMENTS.md');
+const onlyArg = process.argv.indexOf('--only');
+const ONLY = onlyArg > 0 ? process.argv[onlyArg + 1].split(',') : null;
 
-const block = /```requirements\r?\n([\s\S]*?)```/.exec(fs.readFileSync(FILE, 'utf8'));
-if (!block) { console.error('REQUIREMENTS.md: falta el bloque ```requirements'); process.exit(1); }
-
-const reqs = block[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-  .map((l) => { const [repo, plugin] = l.split(/\s+/); return { repo, plugin, name: plugin.split('@')[0] }; });
-
-const claude = (args) => spawnSync(`claude plugin ${args}`, { shell: true, encoding: 'utf8' });
-
-let installed = [];
-try { installed = JSON.parse(claude('list --json').stdout || '[]').map((p) => String(p.id || p.name || '')); } catch { /* sin lista: se intenta instalar todo */ }
-const has = (r) => installed.some((id) => id === r.plugin || id.split('@')[0] === r.name);
+const reqs = readRequirements().filter((r) => !ONLY || ONLY.includes(r.plugin));
+const ids = installedIds() || [];
 
 let fallos = 0;
 for (const r of reqs) {
-  if (has(r)) { console.log(`ya instalado  ${r.plugin}`); continue; }
+  if (isInstalled(ids, r)) { console.log(`ya instalado  ${r.plugin}`); continue; }
   if (DRY) { console.log(`instalaría    ${r.plugin}  (claude plugin marketplace add ${r.repo})`); continue; }
-  const add = claude(`marketplace add ${r.repo}`);
-  const inst = add.status === 0 ? claude(`install ${r.plugin}`) : add;
-  if (inst.status === 0) console.log(`instalado     ${r.plugin}`);
-  else { fallos++; console.log(`FALLÓ         ${r.plugin}: ${(inst.stderr || inst.stdout || '').trim().split('\n').pop()}`); }
+  const res = installOne(r);
+  if (ONLY) { const s = readStamp(); s[r.plugin] = { ...s[r.plugin], ok: res.ok }; writeStamp(s); }
+  if (res.ok) console.log(`instalado     ${r.plugin}`);
+  else { fallos++; console.log(`FALLÓ         ${r.plugin}: ${res.msg}`); }
 }
 if (!DRY && reqs.length && fallos < reqs.length) console.log('\nReinicia Claude Code (o /reload-plugins) para que carguen.');
 process.exit(fallos ? 1 : 0);

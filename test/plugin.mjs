@@ -14,11 +14,13 @@ const PLUGIN = path.join(REPO, 'plugin');
 const SHOW = process.argv.includes('--show');
 const REAL = !!process.env.CLAUDEOP_REAL;
 
-// Las copias de src/ dentro del plugin tienen que estar al día (si falla: npm run build:plugin)
-for (const f of ['actions.mjs', 'intent.mjs', 'stack.mjs']) {
-  assert.equal(fs.readFileSync(path.join(PLUGIN, 'scripts', f), 'utf8'), fs.readFileSync(path.join(REPO, 'src', f), 'utf8'), `plugin/scripts/${f} está desactualizado: npm run build:plugin`);
+assert.equal(fs.readdirSync(path.join(PLUGIN, 'agents')).filter((f) => f.endsWith('.md')).length, 25, 'faltan agentes');
+// Cada hook apunta a un script que existe
+const hooks = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8')).hooks;
+for (const g of Object.values(hooks).flat()) for (const h of g.hooks) {
+  const f = /scripts\/([\w.-]+)/.exec(h.command)?.[1];
+  assert.ok(f && fs.existsSync(path.join(PLUGIN, 'scripts', f)), `hook sin script: ${h.command}`);
 }
-assert.equal(fs.readdirSync(path.join(PLUGIN, 'agents')).filter((f) => f.endsWith('.md')).length, 25, 'faltan agentes: npm run build:plugin');
 
 // Entorno falso: un plugin con un agente y una skill, un MCP "blender" y un flujo propio
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claudeop-test-'));
@@ -99,6 +101,38 @@ if (!REAL) assert.ok(t.includes('Lanzamiento de juego (flujo propio)') && t.incl
 t = route('necesito algo para mejorar la organización de mi equipo y planificar la semana de trabajo');
 show('sin flujo concreto', t);
 assert.ok(t.includes('MÉTODO GENERAL') || t.includes('Flujos que encajan'), 'tarea sin flujo → método general');
+
+// ---- Requisitos: se instalan solos, una vez, y sin tocar tu Claude Code (usa un «claude» falso) ----
+const reqs = fs.readFileSync(path.join(PLUGIN, 'REQUIREMENTS.md'), 'utf8').match(/```requirements\r?\n([\s\S]*?)```/)[1].split('\n').filter((l) => l.trim());
+assert.equal(reqs.length, 4, 'REQUIREMENTS.md debe listar 4 plugins');
+
+const fake = path.join(tmp, 'fakebin');
+const calls = path.join(tmp, 'claude-calls.log');
+w(path.join(fake, 'claude.mjs'), `import fs from 'node:fs';
+const a = process.argv.slice(2).join(' ');
+if (a === 'plugin list --json') process.stdout.write(JSON.stringify([{ id: 'claude-mem@thedotmack' }]));
+else fs.appendFileSync(${JSON.stringify(calls)}, a + '\\n');`);
+w(path.join(fake, 'claude.cmd'), '@node "%~dp0claude.mjs" %*\r\n');
+w(path.join(fake, 'claude'), '#!/bin/sh\nexec node "$(dirname "$0")/claude.mjs" "$@"\n');
+try { fs.chmodSync(path.join(fake, 'claude'), 0o755); } catch { /* Windows */ }
+
+const boot = { PATH: `${fake}${path.delimiter}${path.dirname(process.execPath)}`, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-boot') };
+const wait = async (cond) => { for (let i = 0; i < 60 && !cond(); i++) await new Promise((r) => setTimeout(r, 250)); };
+const log = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
+
+t = run('bootstrap.mjs', {}, boot);
+assert.ok(t && t.includes('pro-workflow') && t.includes('auto-harness') && t.includes('arscontexta'), 'avisa de lo que instala');
+assert.ok(!t.includes('claude-mem'), 'no menciona lo que ya estaba instalado');
+await wait(() => log().includes('install arscontexta@agenticnotetaking'));
+for (const r of reqs.slice(1)) {
+  const [repo, plugin] = r.trim().split(/\s+/);
+  assert.ok(log().includes(`plugin marketplace add ${repo}`) && log().includes(`plugin install ${plugin}`), `no instaló ${plugin}`);
+}
+assert.ok(!log().includes('claude-mem'), 'no debe reinstalar lo que ya está');
+await wait(() => Object.values(JSON.parse(fs.readFileSync(path.join(boot.CLAUDE_PLUGIN_DATA, 'bootstrap.json'), 'utf8'))).every((s) => s.ok));
+assert.equal(run('bootstrap.mjs', {}, boot), null, 'no vuelve a instalar lo que ya instaló una vez (aunque el usuario lo quite)');
+assert.equal(run('bootstrap.mjs', {}, { ...boot, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-off'), CLAUDEOP_NO_INSTALL: '1' }), null, 'CLAUDEOP_NO_INSTALL=1 lo desactiva');
+assert.equal(run('bootstrap.mjs', {}, { CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-noclaude') }), null, 'sin «claude» en el PATH no hace nada');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('plugin: todo OK');

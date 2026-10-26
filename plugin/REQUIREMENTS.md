@@ -1,6 +1,13 @@
 # Requisitos de claudeop
 
-Plugins que `claudeop` recomienda tener instalados. Funciona como un `requirements.txt`: la lista está en el bloque `requirements` de abajo y el script `scripts/install-requirements.mjs` la lee e instala lo que falte. Para instalarlos, dile a Claude «instala los requisitos de claudeop» o ejecuta el script:
+Plugins que `claudeop` instala por ti. Funciona como un `requirements.txt`: la lista está en el bloque `requirements` de abajo.
+
+**Es automático.** La primera vez que abres Claude Code con `claudeop` instalado, el hook `scripts/bootstrap.mjs` añade los marketplaces e instala en segundo plano los que falten, y Claude te avisa de que reinicies cuando termine. Reglas:
+- Un plugin que ya se instaló una vez y luego lo quitas **no se vuelve a instalar**.
+- Si una instalación falla, se reintenta como mucho 3 veces, con 12 h entre intentos. El motivo queda en `bootstrap.log` (carpeta de datos del plugin).
+- Desactivarlo: variable `CLAUDEOP_NO_INSTALL=1` (o `CLAUDEOP=off` para apagar todo el plugin).
+
+**A mano**, por si quieres forzarlo o ver qué haría:
 
 ```bash
 node scripts/install-requirements.mjs            # instala los que falten

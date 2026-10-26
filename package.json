@@ -1,22 +1,12 @@
 {
-  "name": "claude-router",
-  "version": "0.9.0",
-  "description": "Plugin claudeop para Claude Code (delegación automática entre Haiku/Sonnet/Opus, sin comandos) y panel opcional cla",
+  "name": "claudeop",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Plugin claudeop para Claude Code: delegación automática entre Haiku/Sonnet/Opus, flujos y especialistas, sin comandos",
   "type": "module",
-  "bin": {
-    "cla": "./bin/cla.mjs"
-  },
   "scripts": {
-    "start": "node bin/cla.mjs",
-    "terminal": "node bin/cla.mjs --terminal",
-    "build:plugin": "node tools/build-plugin.mjs",
-    "test": "node test/plugin.mjs && node test/smoke.mjs",
-    "test:plugin": "node test/plugin.mjs --show",
-    "test:web": "python3 test/web.py",
-    "test:tui": "python3 test/ui-pty.py"
-  },
-  "dependencies": {
-    "blessed": "^0.1.81"
+    "test": "node test/plugin.mjs",
+    "test:show": "node test/plugin.mjs --show"
   },
   "engines": {
     "node": ">=18"
@@ -29,16 +19,5 @@
   "homepage": "https://github.com/Ivankirito22/ClaudeOP#readme",
   "bugs": {
     "url": "https://github.com/Ivankirito22/ClaudeOP/issues"
-  },
-  "files": [
-    "bin",
-    "src",
-    "web",
-    "plugin",
-    ".claude-plugin",
-    "tools",
-    "install.ps1",
-    "install.sh",
-    "README.md"
-  ]
+  }
 }

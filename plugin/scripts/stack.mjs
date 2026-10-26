@@ -61,13 +61,9 @@ export const SPECIALISTS = {
 };
 
 export const SPEC_KEYS = Object.keys(SPECIALISTS);
-const PUBLIC = ({ tag, kw, ext, ...def }) => def;
-export const specialistDefs = (keys) => Object.fromEntries((keys || []).filter((k) => SPECIALISTS[k]).map((k) => [k, PUBLIC(SPECIALISTS[k])]));
 const nrm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-// Qué especialistas tocan según lo que escribes (palabras clave; el enrutador de Haiku lo hace mejor y esto es el plan B)
+// Qué especialistas tocan según lo que escribes (por palabras clave)
 export const specialistsFor = (text) => SPEC_KEYS.filter((k) => SPECIALISTS[k].kw.test(nrm(text)));
-// Para el enrutador: una línea por especialista
-export const SPEC_DESC = Object.fromEntries(SPEC_KEYS.map((k) => [k, SPECIALISTS[k].tag]));
 
 function readJson(f) {
   try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; }

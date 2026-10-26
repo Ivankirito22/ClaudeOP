@@ -78,7 +78,7 @@ function main() {
       lines.push('Combínalos en UN solo trabajo: un solo explorador para todo, el paralelismo de cada flujo se mantiene, UN verificador al final, y los de solo lectura (revisión/auditoría) van DESPUÉS de implementar.');
     }
     for (const a of flows) {
-      const body = bodyOf(a, '').replace(/ SIN tocar el bloque entre .*?<!-- claude-router:end -->\./, '.');
+      const body = bodyOf(a, '');
       lines.push(`### ${a.label}\n${body}`);
     }
     for (const f of own) lines.push(`### ${f.label} (flujo propio)\n${f.body}`);

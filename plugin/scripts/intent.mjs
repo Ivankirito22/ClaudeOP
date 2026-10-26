@@ -1,8 +1,6 @@
 // Reconoce, en lo que escribes con tus palabras, los flujos que ya existen ("optimiza el código" → Optimizar proyecto)
 // y compone varias acciones en UNA sola instrucción. Todo local y gratis: no llama a ningún modelo.
 
-import { SPEC_KEYS, SPEC_DESC, specialistsFor } from './stack.mjs';
-
 export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 // weak: solo cuenta si aparece al principio de una frase de 6+ palabras que no es pregunta (verbos muy genéricos: "haz", "añade"…; así un cambio pequeño no dispara un flujo grande)
@@ -86,93 +84,10 @@ export const FLOW_CATALOG = `Known workflows (the user's buttons). When a reques
 - Preparar release: tests + changes in parallel → risks → changelog → proposed version (never push).`;
 
 // ---------- Componer acciones + texto en una sola instrucción ----------
-export const needsText = (a) => !!a.input;
-
 export function bodyOf(a, text) {
   if (a.wrap) return a.wrap(text || '(la petición del usuario está arriba)');
   if (a.prompt) return a.prompt;
   return text || '';
-}
-
-export function composePrompt(list, text) {
-  const t = String(text || '').trim();
-  if (!list.length) return t;
-  if (list.length === 1) {
-    const a = list[0];
-    if (a.wrap) return a.wrap(t);
-    if (a.prompt) return t ? `${a.prompt}\n\nPetición concreta del usuario (tiene prioridad): ${t}` : a.prompt;
-    return t;
-  }
-  const parts = list.map((a, i) => `### Flujo ${i + 1}: ${a.label}\n${bodyOf(a, t)}`);
-  return `${t ? `PETICIÓN DEL USUARIO (prioridad máxima): ${t}\n\n` : ''}Haz TODO lo siguiente en UNA sola instrucción, como un único trabajo coordinado. Aplica cada flujo como método para esta petición. Reglas de combinación: un solo explorador para todo (no repitas la exploración), el paralelismo de cada flujo se mantiene, UN solo verificador al final, y si un flujo es de solo lectura (revisión/auditoría) ejecútalo DESPUÉS de implementar y sobre el resultado. Empieza anunciando en una línea el orden que seguirás.
-
-${parts.join('\n\n')}`;
-}
-
-// ---------- Enrutador con Haiku (entiende faltas de ortografía, jerga y frases raras) ----------
-export const FLOW_DESC = {
-  '/optimizar': 'optimizar el proyecto: limpiar, quitar duplicados, mejorar sin cambiar el comportamiento',
-  '/limpiar': 'quitar código muerto, imports sin usar',
-  '/md': 'crear o actualizar el CLAUDE.md del proyecto',
-  '/explicar': 'explicar qué hace el proyecto y cómo está organizado',
-  '/probar': 'ejecutar tests / compilar',
-  '/tests': 'escribir tests nuevos',
-  '/documentar': 'documentar el código (comentarios, README)',
-  '/bug': 'cazar un bug sencillo',
-  '/bugprofundo': 'arreglar un bug o error a fondo (reproducir, causa raíz, test)',
-  '/revisar': 'revisar el código / los cambios',
-  '/seguridad': 'auditoría de seguridad',
-  '/auditoria': 'auditoría completa (calidad + seguridad), solo lectura',
-  '/refactor': 'refactorizar sin romper nada',
-  '/decidir': 'investigar opciones/librerías y decidir cuál usar',
-  '/pulir': 'segunda pasada sobre lo último que se cambió',
-  '/rendimiento': 'cazar cuellos de botella, lag, cosas lentas',
-  '/release': 'preparar una release/versión (changelog)',
-  '/plugins': 'recomendar plugins o servidores MCP',
-  '/investigar': 'investigar algo en la web',
-  '/feature': 'crear/implementar algo nuevo (funcionalidad, modelo, pantalla, sistema…)',
-};
-
-export const ROUTER_MARK = 'enrutador de un asistente de programación';
-
-export function routerPrompt(text, actions) {
-  const list = actions.map((a) => `${a.cmd}: ${FLOW_DESC[a.cmd] || a.label}`).join('\n');
-  return `Eres el ${ROUTER_MARK}. Lee la petición del usuario (puede tener faltas de ortografía, jerga, mezcla de idiomas o estar mal redactada: entiende lo que quiere decir) y responde SOLO con un JSON en una línea, sin texto extra ni explicaciones:
-{"kind":"pregunta|pequeno|tarea","flows":["/comando",...],"tech":["clave",...]}
-- kind: "pregunta" = solo quiere información o una explicación; "pequeno" = un cambio trivial (un archivo, pocas líneas); "tarea" = cualquier otra cosa que implique construir, cambiar, arreglar, optimizar, analizar o planificar.
-- flows: los flujos de esta lista que encajan con lo que PIDE (puede haber varios; [] si ninguno encaja). No inventes comandos.
-- tech: las tecnologías/lenguajes/herramientas con las que HAY QUE TRABAJAR para hacer lo pedido (de la lista de claves de abajo; [] si no se nombra ni se deduce ninguna; máximo 3). Solo las que de verdad hacen falta.
-Flujos:
-${list}
-Claves de tech: ${SPEC_KEYS.map((k) => `${k} (${SPEC_DESC[k]})`).join(', ')}
-
-Petición del usuario:
-<<<
-${text}
->>>`;
-}
-
-// Devuelve { kind, cmds, techs } o null si la respuesta no es utilizable
-export function parseRouter(out, allowed) {
-  const m = /\{[\s\S]*?\}/.exec(String(out || ''));
-  if (!m) return null;
-  let j;
-  try { j = JSON.parse(m[0]); } catch { return null; }
-  const kind = ['pregunta', 'pequeno', 'pequeño', 'tarea'].includes(j.kind) ? (j.kind === 'pequeño' ? 'pequeno' : j.kind) : null;
-  if (!kind) return null;
-  const cmds = (Array.isArray(j.flows) ? j.flows : []).filter((c) => typeof c === 'string' && allowed.includes(c));
-  const techs = [...new Set((Array.isArray(j.tech) ? j.tech : []).map((t) => String(t).toLowerCase()).filter((t) => SPEC_KEYS.includes(t)))].slice(0, 3);
-  return { kind, cmds: [...new Set(cmds)].sort((a, b) => rank(a) - rank(b)), techs };
-}
-
-// Sin Haiku (sin red, sin login…): palabras clave y una estimación del tipo de petición
-export function localRoute(text) {
-  const cmds = detectCmds(text);
-  const t = norm(text).trim();
-  const words = t.split(/\s+/).filter(Boolean).length;
-  const question = /\?\s*$/.test(t) || /^[\s¿]*(que|como|por que|donde|cual|cuando|quien|cuanto)\b/.test(t);
-  const kind = question ? 'pregunta' : words >= 6 || cmds.length ? 'tarea' : 'pequeno';
-  return { kind, cmds, techs: specialistsFor(text).slice(0, 3) };
 }
 
 // Para lo que no encaja con ningún flujo pero es un trabajo de verdad: el método completo, igualmente

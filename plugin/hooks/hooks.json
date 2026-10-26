@@ -10,6 +10,16 @@
             "timeout": 40
           }
         ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs\"",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
