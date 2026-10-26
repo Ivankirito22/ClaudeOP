@@ -60,6 +60,8 @@ Actualizar: `claude plugin update claudeop` · Desinstalar: `claude plugin unins
 
 **Después:** abre (o reinicia) Claude Code. En la primera sesión instala en segundo plano [Claude-Mem y Pro Workflow](#-plugins-que-instala-solo) y te avisa de que reinicies una última vez.
 
+**Consejo para gastar menos:** usa Sonnet como modelo principal (`/model sonnet`); Haiku y Opus los reparte el plugin.
+
 **¿Funciona?** Dile a Claude **«revisa claudeop»**: ejecuta un diagnóstico que prueba Node, los hooks, los agentes y los plugins, y te dice qué falla si algo falla.
 
 ---
@@ -250,6 +252,12 @@ A propósito: un push no se deshace. Confirma y sigue, o usa `CLAUDEOP_GUARD=off
 <summary><b>No veo que delegue.</b></summary>
 
 Pregunta «¿cuánto he delegado?». En proyectos muy pequeños Claude hace bien en no delegar (lanzar un subagente costaría más que hacerlo). Prueba con una tarea de varios pasos. Las notas **empujan, no obligan**: la decisión es de Claude.
+</details>
+
+<details>
+<summary><b>¿Qué modelo principal me conviene?</b></summary>
+
+**Sonnet.** Escribe `/model sonnet` en Claude Code. En una instalación limpia de prueba el principal por defecto fue **Opus** (el 85 % de los tokens) y solo se delegó el 15 %: con Sonnet de principal, Haiku para lo mecánico y Opus solo para el `arquitecto`, el reparto sale mucho más barato.
 </details>
 
 <details>
