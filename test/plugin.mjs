@@ -188,12 +188,12 @@ assert.equal(tools.setStatusLine(sl).ok, false, 'un settings.json ilegible no se
 assert.equal(fs.readFileSync(sl, 'utf8'), '{roto');
 assert.ok(tools.hasRtkHook({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'rtk hook claude' }] }] } }), 'detecta el hook de rtk');
 assert.ok(!tools.hasRtkHook({ hooks: { PreToolUse: [{ hooks: [{ command: 'node guard.mjs' }] }] } }), 'sin hook de rtk');
-assert.deepEqual(tools.pending({}).map((x) => x.key), ['rtk', 'ccstatusline', 'autocompact'], 'al principio toca instalar las 3');
-assert.equal(tools.pending({ rtk: { ok: true }, ccstatusline: { ok: true }, autocompact: { ok: true } }).length, 0, 'lo ya hecho no se repite (aunque el usuario lo quite)');
-assert.equal(tools.pending({ rtk: { ok: false, tries: 3, ts: 0 }, ccstatusline: { ok: false, tries: 1, ts: Date.now() }, autocompact: { ok: true } }).length, 0, 'máx. 3 intentos y 12 h entre ellos');
-assert.equal(tools.pending({ rtk: { ok: false, tries: 1, ts: 0 }, ccstatusline: { ok: true }, autocompact: { ok: true } }).length, 1, 'un fallo se reintenta pasadas 12 h');
+assert.deepEqual(tools.pending({}).map((x) => x.key), ['rtk', 'ccstatusline', 'autocompact', 'autoupdate'], 'al principio toca instalar las 4');
+assert.equal(tools.pending({ rtk: { ok: true }, ccstatusline: { ok: true }, autocompact: { ok: true }, autoupdate: { ok: true } }).length, 0, 'lo ya hecho no se repite (aunque el usuario lo quite)');
+assert.equal(tools.pending({ rtk: { ok: false, tries: 3, ts: 0 }, ccstatusline: { ok: false, tries: 1, ts: Date.now() }, autocompact: { ok: true }, autoupdate: { ok: true } }).length, 0, 'máx. 3 intentos y 12 h entre ellos');
+assert.equal(tools.pending({ rtk: { ok: false, tries: 1, ts: 0 }, ccstatusline: { ok: true }, autocompact: { ok: true }, autoupdate: { ok: true } }).length, 1, 'un fallo se reintenta pasadas 12 h');
 const dryTools = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'tools.mjs'), '--dry-run'], { encoding: 'utf8', env });
-assert.equal((dryTools.stdout.match(/instalaría/g) || []).length, 3, '--dry-run solo muestra');
+assert.equal((dryTools.stdout.match(/instalaría/g) || []).length, 4, '--dry-run solo muestra');
 assert.equal(tools.disabled(), false);
 // Autocompactado: pone el tope solo si no hay uno, y conserva el resto
 const ac = path.join(tmp, 'ac', 'settings.json');
@@ -204,14 +204,27 @@ w(ac, JSON.stringify({ autoCompactWindow: 500000 }));
 tools.setAutoCompact(ac);
 assert.equal(JSON.parse(fs.readFileSync(ac, 'utf8')).autoCompactWindow, 500000, 'nunca pisa el valor del usuario');
 
-// Tope de subagentes por petición: el 5.º se bloquea; en otra petición vuelve a empezar; los subagentes no cuentan; CLAUDEOP_MAX_AGENTS lo cambia
-const spawns = Array.from({ length: 6 }, () => guardHook('Agent', { subagent_type: 'claudeop:explorador' }, { prompt_id: 'pa1', session_id: 'sa' }));
-assert.equal(spawns.filter((o) => o?.permissionDecision === 'deny').length, 2, 'bloquea del 5.º en adelante');
-assert.equal(spawns[3], null, 'el 4.º pasa');
+// Tope de subagentes por petición: el 7.º se bloquea; en otra petición vuelve a empezar; los subagentes no cuentan; CLAUDEOP_MAX_AGENTS lo cambia
+const spawns = Array.from({ length: 8 }, () => guardHook('Agent', { subagent_type: 'claudeop:explorador' }, { prompt_id: 'pa1', session_id: 'sa' }));
+assert.equal(spawns.filter((o) => o?.permissionDecision === 'deny').length, 2, 'bloquea del 7.º en adelante');
+assert.equal(spawns[5], null, 'el 6.º pasa');
 assert.equal(guardHook('Agent', {}, { prompt_id: 'pa2', session_id: 'sa' }), null, 'petición nueva: contador a cero');
 assert.equal(guardHook('Agent', {}, { prompt_id: 'pa3', session_id: 'sa', agent_id: 'sub1' }), null, 'un subagente no cuenta');
 assert.equal(Array.from({ length: 3 }, () => guardHook('Agent', {}, { prompt_id: 'pa4', session_id: 'sa' }, { CLAUDEOP_MAX_AGENTS: '2' })).filter((o) => o?.permissionDecision === 'deny').length, 1, 'el tope se puede cambiar');
 assert.match(hooks.PreToolUse[0].matcher, /Agent/, 'el guard está registrado para Agent');
+
+// Actualización automática: marketplace de claudeop con autoUpdate, sin pisar lo que el usuario ya decidió
+const au = path.join(tmp, 'au', 'settings.json');
+w(au, JSON.stringify({ extraKnownMarketplaces: { otro: { source: { source: 'github', repo: 'a/b' } }, claudeop: { source: { source: 'github', repo: 'Ivankirito22/ClaudeOP' } } } }));
+tools.setAutoUpdate(au);
+const auJson = JSON.parse(fs.readFileSync(au, 'utf8')).extraKnownMarketplaces;
+assert.deepEqual([auJson.claudeop.autoUpdate, auJson.claudeop.source.repo, Object.keys(auJson).length], [true, 'Ivankirito22/ClaudeOP', 2], 'activa autoUpdate sin tocar el resto');
+w(au, JSON.stringify({ extraKnownMarketplaces: { claudeop: { source: { source: 'github', repo: 'x/y' }, autoUpdate: false } } }));
+tools.setAutoUpdate(au);
+assert.equal(JSON.parse(fs.readFileSync(au, 'utf8')).extraKnownMarketplaces.claudeop.autoUpdate, false, 'respeta que el usuario lo desactive');
+w(au, '{}');
+tools.setAutoUpdate(au);
+assert.equal(JSON.parse(fs.readFileSync(au, 'utf8')).extraKnownMarketplaces.claudeop.source.repo, 'Ivankirito22/ClaudeOP', 'si no estaba el marketplace, lo declara');
 
 // Lectura entera de un archivo grande: se frena UNA vez por archivo; con offset/limit, archivos pequeños y binarios pasa
 const bigf = path.join(tmp, 'grande.txt');

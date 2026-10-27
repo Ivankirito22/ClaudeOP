@@ -67,7 +67,7 @@
     <text x="824" y="150" font-size="15" fill="#e6e9f2">subagente (arranque)</text>
     <text x="1120" y="150" font-size="15" fill="#34d399" text-anchor="end">~6k tok</text>
     <text x="824" y="182" font-size="15" fill="#e6e9f2">tope de agentes</text>
-    <text x="1120" y="182" font-size="15" fill="#fbbf24" text-anchor="end">4 / petición</text>
+    <text x="1120" y="182" font-size="15" fill="#fbbf24" text-anchor="end">6 / petición</text>
     <text x="824" y="214" font-size="15" fill="#e6e9f2">autocompactado</text>
     <text x="1120" y="214" font-size="15" fill="#fbbf24" text-anchor="end">200k tok</text>
     <text x="824" y="246" font-size="15" fill="#e6e9f2">hooks que llaman a un modelo</text>

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { off, readJson, writeJson, sessionFile } from './data.mjs';
 
 const READS_BEFORE_NUDGE = 8;
-const MAX_AGENTS = 4; // CLAUDEOP_MAX_AGENTS lo cambia
+const MAX_AGENTS = 6; // CLAUDEOP_MAX_AGENTS lo cambia
 const BIG_READ_KB = 40; // ~10k tokens; CLAUDEOP_BIG_READ_KB lo cambia (0 = sin freno)
 const NOT_TEXT = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|ipynb|svg|mp[34]|wav|zip)$/i;
 

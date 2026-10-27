@@ -1,6 +1,6 @@
 {
   "name": "claudeop",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "Plugin claudeop para Claude Code: delegación automática entre Haiku/Sonnet/Opus, flujos y especialistas, sin comandos",
   "type": "module",

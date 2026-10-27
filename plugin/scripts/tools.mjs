@@ -64,12 +64,27 @@ export const setStatusLine = (file = SETTINGS()) => setIfAbsent(file, 'statusLin
 // Autocompactado nativo de Claude Code (ajuste `autoCompactWindow`): el umbral es el MENOR entre este valor y la ventana del modelo,
 // así que 200k nunca pasa de largo. Una sesión sin tope llegó a 450k tokens POR TURNO. Se cambia luego con /autocompact.
 export const AUTOCOMPACT = 200000;
+
+// Claude Code solo actualiza solos los marketplaces oficiales; los de terceros necesitan `autoUpdate: true` en settings.json.
+// Con esto, al abrir Claude Code se comprueba si hay versión nueva de claudeop y se instala (se aplica al reiniciar).
+export function setAutoUpdate(file = SETTINGS()) {
+  const s = readJson(file, null);
+  if (s === null && fs.existsSync(file)) return { ok: false, msg: 'settings.json no se pudo leer: no se toca' };
+  const cur = s || {};
+  const all = { ...(cur.extraKnownMarketplaces || {}) };
+  const mine = all.claudeop || { source: { source: 'github', repo: 'Ivankirito22/ClaudeOP' } };
+  if (mine.autoUpdate !== undefined) return { ok: true, msg: 'ya tenía la actualización automática decidida' };
+  if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.claudeop.bak`);
+  writeJson(file, { ...cur, extraKnownMarketplaces: { ...all, claudeop: { ...mine, autoUpdate: true } } });
+  return { ok: true, msg: 'actualización automática puesta' };
+}
 export const setAutoCompact = (file = SETTINGS()) => setIfAbsent(file, 'autoCompactWindow', AUTOCOMPACT, 'autocompactado');
 
 export const TOOLS = [
   { key: 'rtk', label: 'rtk (comprime la salida de los comandos)', run: installRtk },
   { key: 'ccstatusline', label: 'barra de estado con el contexto en tokens', run: () => setStatusLine() },
   { key: 'autocompact', label: 'autocompactado a 200k tokens (tope al contexto por turno)', run: () => setAutoCompact() },
+  { key: 'autoupdate', label: 'actualización automática de claudeop', run: () => setAutoUpdate() },
 ];
 
 // Qué herramientas toca instalar ahora (nunca instaladas, o falladas con menos de 3 intentos y más de 12 h)

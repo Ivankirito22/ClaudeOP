@@ -5,7 +5,7 @@
 <br>
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.6.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.7.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Dependencias](https://img.shields.io/badge/dependencias-0-0ea5e9?style=for-the-badge)](package.json)
 [![Tests](https://img.shields.io/badge/tests-120%2B-8b5cf6?style=for-the-badge)](test/plugin.mjs)
@@ -13,7 +13,7 @@
 
 **Instalas una vez. Hablas como siempre. El plugin reparte el trabajo entre modelos, vigila el contexto y mide lo que ahorra.**
 
-[Instalar](#-instalar) · [Por qué](#-por-qué-existe) · [Arquitectura](#-arquitectura) · [Capas de ahorro](#-capas-de-ahorro) · [Agentes y flujos](#-agentes-y-flujos) · [Instala solo](#-lo-que-instala-solo) · [Ajustes](#-ajustes) · [FAQ](#-faq)
+[Instalar](#-instalar) · [Actualizar](#-actualizar) · [Por qué](#-por-qué-existe) · [Arquitectura](#-arquitectura) · [Capas de ahorro](#-capas-de-ahorro) · [Agentes y flujos](#-agentes-y-flujos) · [Instala solo](#-lo-que-instala-solo) · [Ajustes](#-ajustes) · [FAQ](#-faq)
 
 </div>
 
@@ -54,6 +54,22 @@ Claude ▸ ⏱ ~4–12 min · Criterio de «hecho»: sin imports ni funciones si
 
 ---
 
+## 🔄 Actualizar
+
+**Se actualiza solo.** Claude Code solo actualiza automáticamente los marketplaces oficiales, así que `claudeop` activa `autoUpdate` para el suyo la primera vez que arranca (solo si no lo habías decidido tú). Desde entonces, al abrir Claude Code comprueba si hay versión nueva, la instala y te pide reiniciar para aplicarla. No tienes que hacer nada.
+
+¿Quieres forzarlo o comprobarlo a mano?
+
+```bash
+claude plugin marketplace update claudeop      # trae la última versión del repo
+claude plugin update claudeop@claudeop         # la instala (se aplica al reiniciar)
+claude plugin list                             # comprueba la versión instalada
+```
+
+Dentro de Claude Code también vale `/plugin` → *Marketplaces* → `claudeop` → *Enable auto-update*. Para desactivarlo, pon `"autoUpdate": false` en `extraKnownMarketplaces.claudeop` de tu `settings.json` (claudeop no lo vuelve a tocar).
+
+---
+
 ## 🔬 Por qué existe
 
 Medido sobre sesiones reales de Claude Code (Windows 11, transcripts propios, `ccusage`):
@@ -71,42 +87,11 @@ Medido sobre sesiones reales de Claude Code (Windows 11, transcripts propios, `c
 
 ## 🔧 Arquitectura
 
-Ningún hook llama a un modelo: son scripts Node de ~90 ms, sin dependencias. Quien decide delegar sigue siendo Claude; el plugin le da la receta, comprueba, frena y mide.
+Ningún hook llama a un modelo: son scripts Node de ~90 ms, sin dependencias. Quien decide delegar sigue siendo Claude; el plugin le da la receta, comprueba, frena y mide. Los recuadros amarillos son las capas de ahorro.
 
-```mermaid
-flowchart TB
-  U(["💬 Tú escribes"]) --> R
-
-  subgraph PLUGIN ["⚡ claudeop · hooks (0 llamadas a modelos)"]
-    direction LR
-    R["<b>route</b><br/>receta del flujo<br/>⏱ estimación<br/>aviso de contexto"]
-    G["<b>guard</b><br/>confirma git push<br/>tope de 4 agentes<br/>frena lecturas enormes"]
-    T["<b>track</b><br/>tokens · tiempo<br/>contexto por turno"]
-    N["<b>notify</b><br/>🔔 aviso del sistema"]
-  end
-
-  R -->|"nota corta"| C{{"🧠 Claude principal"}}
-  G -.-> C
-  C -->|"mecánico"| H["🟢 <b>Haiku</b><br/>explorador · limpiador · probador<br/>documentador · investigador"]
-  C -->|"implementar · revisar"| S["🟡 <b>Sonnet</b><br/>especialista · revisor<br/>depurador · verificador"]
-  C -->|"decisión difícil"| O["🔴 <b>Opus</b><br/>arquitecto"]
-  H --> C
-  S --> C
-  O --> C
-  C --> T
-  C --> N
-  T --> L[("📊 historial local")]
-  L --> E["⏱ estimaciones<br/>informe de ahorro"]
-  E -.-> R
-  N --> W(["🔔 aviso"])
-
-  classDef cheap fill:#d1fae5,stroke:#10b981,color:#064e3b
-  classDef mid fill:#fef3c7,stroke:#f59e0b,color:#78350f
-  classDef top fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
-  class H cheap
-  class S mid
-  class O top
-```
+<div align="center">
+<img src="assets/architecture.svg" alt="Arquitectura de claudeop: entrada, hooks, Claude principal, subagentes Haiku/Sonnet/Opus y medición" width="100%">
+</div>
 
 <details>
 <summary><b>Los hooks, uno a uno</b></summary>
@@ -116,7 +101,7 @@ flowchart TB
 | `SessionStart` | `session-start` | Da a Claude las reglas de reparto y lo que tienes instalado; retoma `estado.md`; tras compactar vuelve a dar las recetas. |
 | `SessionStart` | `bootstrap` | Instala en segundo plano plugins y herramientas que falten (solo al arrancar). |
 | `UserPromptSubmit` | `route` | Reconoce flujos y tecnologías; añade la nota con el ⏱ **solo si hay trabajo**; la receta de un flujo se da **una vez por sesión**; avisa al pasar de ~120k de contexto. |
-| `PreToolUse` | `guard` | Confirma comandos peligrosos · **tope de 4 subagentes por petición** · **frena una vez la lectura entera de archivos de más de 40 KB** · recuerda delegar tras 8 lecturas seguidas. |
+| `PreToolUse` | `guard` | Confirma comandos peligrosos · **tope de 6 subagentes por petición (agrupando lo relacionado)** · **frena una vez la lectura entera de archivos de más de 40 KB** · recuerda delegar tras 8 lecturas seguidas. |
 | `SubagentStop` | `track` | Anota los tokens de cada subagente por modelo (asíncrono). |
 | `Stop` | `track` · `notify` | Anota tokens, duración y **tamaño del contexto**; avisa de «terminado» si fue largo (asíncronos). |
 | `StopFailure` · `Notification` | `notify` | Avisa si Claude se detiene por un error o espera un permiso. |
@@ -131,7 +116,7 @@ Cada capa ataca un sitio distinto donde se van los tokens. Todas son automática
 | # | Capa | Cómo | Dónde se nota |
 |---|---|---|---|
 | 1 | **Delegación por modelo** | Lo mecánico a Haiku, lo normal a Sonnet, solo lo difícil a Opus | tokens caros → baratos |
-| 2 | **Tope de subagentes** | El 5.º agente de una petición se bloquea; hay que agrupar | evita ráfagas de arranques (~6k cada uno) |
+| 2 | **Agrupar y topar subagentes** | Lo relacionado va en UN agente; lo independiente, en paralelo; el 7.º de una petición se bloquea | menos arranques (~6k cada uno) y más rápido |
 | 3 | **Freno a lecturas enormes** | Leer entero un archivo de +40 KB se frena una vez: `Grep` + `offset/limit` o al explorador | ese texto se reenviaría en *cada* turno |
 | 4 | **Autocompactado a 200k** | Ajuste nativo `autoCompactWindow`: el umbral es el menor entre 200k y la ventana del modelo | corta el crecimiento hasta 450k por turno |
 | 5 | **Vigilante de contexto** | Al pasar de 120k avisa y guarda el estado en `estado.md` por si se compacta | sin perder el hilo |
@@ -191,6 +176,7 @@ La lista está en [`plugin/REQUIREMENTS.md`](plugin/REQUIREMENTS.md). Reglas: un
 | 🔁 | [**Pro Workflow**](https://github.com/rohitg00/pro-workflow) | Tus correcciones se guardan como reglas; `/wrap-up`, `/doctor`, vigilancia de git y secretos. |
 | ✂️ | [**rtk**](https://github.com/rtk-ai/rtk) | Comprime la salida de Bash. Solo un hook en `settings.json` (con copia `.bak`); se quita con `rtk init -g --uninstall`. |
 | 📟 | [**ccstatusline**](https://github.com/sirmalloc/ccstatusline) | Barra de estado con el **contexto en tokens**. Solo si no tienes ya una; versión fija. |
+| 🔄 | **Actualización automática** | `autoUpdate: true` para el marketplace de claudeop, solo si no lo habías decidido. |
 | 📉 | **Autocompactado** | `autoCompactWindow: 200000` en `settings.json`, solo si no lo tienes; se cambia con `/autocompact`. |
 | 💸 | [**ccusage**](https://github.com/ryoppippi/ccusage) | Sin instalar: Claude lo ejecuta con `npx` cuando preguntas cuánto gastas. |
 
@@ -210,7 +196,7 @@ Todo es opcional. Variables de entorno (o la propia frase):
 | Que una petición no delegue | «sin delegar», «no uses agentes», «hazlo tú solo» |
 | No instalar plugins / herramientas | `CLAUDEOP_NO_INSTALL=1` · `CLAUDEOP_NO_TOOLS=1` |
 | Sin confirmaciones de `git push`… | `CLAUDEOP_GUARD=off` |
-| Tope de subagentes por petición (4) | `CLAUDEOP_MAX_AGENTS=6` |
+| Tope de subagentes por petición (6) | `CLAUDEOP_MAX_AGENTS=8` |
 | Freno a lecturas grandes (40 KB; 0 = sin freno) | `CLAUDEOP_BIG_READ_KB=100` |
 | Avisos del sistema / umbral | `CLAUDEOP_NOTIFY=off` · `CLAUDEOP_NOTIFY_MIN_SEC=60` |
 
@@ -235,9 +221,9 @@ A propósito, y solo una vez por archivo: leerlo entero lo metería en el contex
 </details>
 
 <details>
-<summary><b>Bloquea un subagente («ya hay 4 en esta petición»).</b></summary>
+<summary><b>Bloquea un subagente («ya hay 6 en esta petición»).</b></summary>
 
-Cada subagente cuesta ~6k tokens solo por arrancar. Claude reutiliza lo ya devuelto o agrupa lo pendiente en uno. Sube el tope con `CLAUDEOP_MAX_AGENTS`.
+Cada subagente cuesta ~6k tokens solo por arrancar. Claude reutiliza lo ya devuelto o agrupa lo pendiente (lo relacionado, en un solo agente). Sube el tope con `CLAUDEOP_MAX_AGENTS`.
 </details>
 
 <details>
@@ -286,7 +272,7 @@ plugin/                       lo que se instala
 │   ├── ctx · eta · flows · intent · stack · lib · data     piezas comunes
 │   └── stats · doctor                                      informes
 └── REQUIREMENTS.md           lo que se instala solo
-assets/banner.svg             la cabecera de este README
+assets/                       banner.svg y architecture.svg (las imágenes de este README)
 .claude-plugin/               marketplace (apunta a ./plugin)
 install.ps1 · install.sh      instaladores de un comando
 test/plugin.mjs               120+ comprobaciones
