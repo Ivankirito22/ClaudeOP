@@ -112,8 +112,8 @@ assert.ok(t.includes('método general') || t.includes('Flujos:'), 'tarea sin flu
 // ---- Requisitos: se instalan solos, una vez, y sin tocar tu Claude Code (usa un «claude» falso) ----
 const block = (kind) => fs.readFileSync(path.join(PLUGIN, 'REQUIREMENTS.md'), 'utf8').match(new RegExp('```' + kind + '\\r?\\n([\\s\\S]*?)```'))[1].split('\n').filter((l) => l.trim());
 const reqs = block('requirements');
-assert.equal(reqs.length, 2, 'REQUIREMENTS.md: 2 plugins automáticos (memoria y flujo)');
-assert.equal(block('optional').length, 6, 'REQUIREMENTS.md: 6 opcionales');
+assert.equal(reqs.length, 1, 'REQUIREMENTS.md: 1 plugin automático (documentación al día); la memoria va integrada');
+assert.equal(block('optional').length, 7, 'REQUIREMENTS.md: 7 opcionales');
 
 const fake = path.join(tmp, 'fakebin');
 const calls = path.join(tmp, 'claude-calls.log');
@@ -131,10 +131,10 @@ const log = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
 
 t = run('bootstrap.mjs', {}, boot);
 assert.ok(t && t.includes('context7'), 'avisa de lo que instala');
-assert.ok(!t.includes('claude-mem'), 'no menciona lo que ya estaba instalado');
+assert.ok(!t.includes('claude-mem'), 'claude-mem ya no se instala solo');
 assert.ok(!t.includes('auto-harness') && !t.includes('arscontexta'), 'los opcionales no se instalan solos');
 await wait(() => log().includes('install context7@claude-plugins-official'));
-for (const r of reqs.slice(1)) {
+for (const r of reqs) {
   const [repo, plugin] = r.trim().split(/\s+/);
   assert.ok(log().includes(`plugin marketplace add ${repo}`) && log().includes(`plugin install ${plugin}`), `no instaló ${plugin}`);
 }
@@ -144,7 +144,7 @@ assert.equal(run('bootstrap.mjs', {}, boot), null, 'no vuelve a instalar lo que 
 assert.equal(run('bootstrap.mjs', {}, { ...boot, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-off'), CLAUDEOP_NO_INSTALL: '1' }), null, 'CLAUDEOP_NO_INSTALL=1 lo desactiva');
 assert.equal(run('bootstrap.mjs', {}, { CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-noclaude') }), null, 'sin «claude» en el PATH no hace nada');
 const dry = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'install-requirements.mjs'), '--dry-run', '--optional'], { encoding: 'utf8', env: { ...env, ...boot } });
-assert.equal((dry.stdout.match(/instalaría/g) || []).length, 7, '--optional suma los 6 opcionales a lo que falta (context7 + 6)');
+assert.equal((dry.stdout.match(/instalaría/g) || []).length, 7, '--optional suma los opcionales a lo que falta (context7 + 6; claude-mem figura ya instalado)');
 
 // ---- Protección: confirmación antes de lo que no se deshace ----
 for (const c of ['git push', 'git push origin main --force', 'git -C ../otro push', 'git reset --hard HEAD~1', 'git clean -fd', 'git branch -D viejo', 'cd x && git push', 'rm -rf ~', 'rm -rf /', 'rm -rf *']) {
@@ -251,6 +251,72 @@ assert.ok(first.includes('Optimizar') && second.includes('receta ya dada'), 'la 
 assert.ok(second.length < first.length - 200, 'y la nota es bastante más corta');
 run('session-start.mjs', { cwd, source: 'compact', session_id: 'sr' }, { CLAUDE_PLUGIN_DATA: recData });
 assert.ok(!recipe('r3').includes('receta ya dada'), 'tras compactar se vuelve a dar la receta');
+
+// ---- Memoria entre sesiones: se anota sola al terminar cada respuesta y se recuerda al abrir la siguiente ----
+const memData = path.join(tmp, 'data-mem');
+const memProj = path.join(tmp, 'proj-mem');
+w(path.join(memProj, 'package.json'), JSON.stringify({ scripts: { test: 'node test.js', build: 'tsc' } }));
+const L = (o) => JSON.stringify(o);
+const FAKE = ['sk', 'abcdefghijklmnopqrstuvwx1234'].join('-'); // clave falsa montada al vuelo
+const mtr = path.join(tmp, 'mem-transcript.jsonl');
+fs.writeFileSync(mtr, [
+  L({ type: 'ai-title', aiTitle: 'Arreglar el login', sessionId: 'sm1' }),
+  L({ type: 'user', timestamp: '2026-10-20T12:00:00.000Z', message: { role: 'user', content: 'arregla el login. Quiero que todo sea automático y que no tenga que hacer nada. ¿Siempre tengo que pedirlo así? Recuerda poner el README bonito.' } }),
+  L({ type: 'assistant', message: { id: 'a1', role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: { file_path: path.join(memProj, 'src', 'login.js') } }, { type: 'tool_use', name: 'Write', input: { file_path: path.join(tmp, 'fuera-del-proyecto.js') } }, { type: 'tool_use', name: 'Agent', input: { subagent_type: 'claudeop:explorador' } }] } }),
+  L({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'Siempre se ignora lo que viene de una herramienta' }] } }),
+  L({ type: 'user', message: { role: 'user', content: 'Another Claude session sent a message while you were working: siempre ignorar esto' } }),
+  L({ type: 'user', message: { role: 'user', content: 'Recuerda que mi clave es ' + FAKE + ' para probar. Siempre usa pnpm en este proyecto. Este test siempre falla en Windows. No sé por qué nunca llega el evento.' } }),
+  L({ type: 'assistant', message: { id: 'a2', role: 'assistant', content: [{ type: 'text', text: 'Resultado: el login ya valida la contraseña y hay un test nuevo.' }] } }),
+].join('\n') + '\n');
+const memEnv = { ...env, CLAUDE_PLUGIN_DATA: memData, CLAUDEOP_MEMORY_ANY: '1' };
+const trackMem = (sid, tp, e = {}, cwdX = memProj) => spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'track.mjs'), 'main'], { input: JSON.stringify({ session_id: sid, cwd: cwdX, transcript_path: tp }), encoding: 'utf8', env: { ...memEnv, ...e } });
+const startMem = (sid, e = {}) => { const r = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'session-start.mjs')], { input: JSON.stringify({ cwd: memProj, source: 'startup', session_id: sid }), encoding: 'utf8', env: { ...memEnv, ...e } }); return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : ''; };
+trackMem('sm1', mtr);
+const memText = startMem('sm2');
+assert.ok(memText.includes('MEMORIA AUTOMÁTICA') && memText.includes('Arreglar el login'), 'la sesión siguiente recibe la memoria con el título');
+assert.ok(memText.includes('el login ya valida la contraseña'), 'recuerda cómo acabó');
+assert.ok(memText.includes('src/login.js') && !memText.includes('fuera-del-proyecto'), 'recuerda qué archivo del proyecto se tocó (y no los de fuera)');
+assert.ok(memText.includes('20/10') && !memText.includes('poner el README'), 'la fecha es la de la sesión y «recuerda poner…» no es una preferencia');
+assert.ok(memText.includes('Quiero que todo sea automático') && memText.includes('usa pnpm'), 'detecta las preferencias del usuario');
+assert.ok(!memText.includes('siempre falla') && !memText.includes('nunca llega'), '«siempre/nunca» en medio de una frase no es una preferencia');
+assert.ok(!memText.includes('Siempre tengo que pedirlo') && !memText.includes('ignorar esto') && !memText.includes('Siempre se ignora'), 'no guarda preguntas, mensajes internos ni resultados de herramientas');
+assert.ok(!memText.includes(FAKE) && memText.includes('«secreto»'), 'los secretos se tapan');
+assert.ok(memText.includes('npm test') && memText.includes('npm run build'), 'da los comandos del proyecto');
+assert.ok(!startMem('sm1').includes('Arreglar el login'), 'la sesión en curso no se recuerda a sí misma');
+fs.appendFileSync(mtr, L({ type: 'assistant', message: { id: 'a3', role: 'assistant', content: [{ type: 'text', text: 'Resultado: además dejé el logout con su test y todo en verde.' }] } }) + '\n');
+trackMem('sm1', mtr);
+const projFiles = fs.readdirSync(path.join(memData, 'memory')).filter((x) => /^proj-mem-.*\.json$/.test(x));
+const projJson = JSON.parse(fs.readFileSync(path.join(memData, 'memory', projFiles[0]), 'utf8'));
+assert.deepEqual([projFiles.length, projJson.sessions.length, projJson.sessions[0].prompts], [1, 1, 2], 'una sola ficha por sesión, sin duplicar al leer de nuevo');
+assert.ok(projJson.sessions[0].outcome.includes('logout') && projJson.sessions[0].agents.explorador === 1, 'actualiza con lo nuevo (lectura incremental)');
+assert.ok(startMem('sm3').length < 6500, 'el arranque sigue siendo corto');
+assert.ok(!startMem('sm4', { CLAUDEOP_MEMORY: 'off' }).includes('MEMORIA AUTOMÁTICA'), 'CLAUDEOP_MEMORY=off la apaga');
+const memOffData = path.join(tmp, 'data-mem-off');
+trackMem('sm9', mtr, { CLAUDEOP_MEMORY: 'off', CLAUDE_PLUGIN_DATA: memOffData });
+assert.ok(!fs.existsSync(path.join(memOffData, 'memory')), 'apagada, no escribe nada');
+trackMem('sm7', mtr, { CLAUDEOP_MEMORY_ANY: '', CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-mem-tmp') }, os.tmpdir());
+assert.ok(!fs.existsSync(path.join(tmp, 'data-mem-tmp', 'memory')), 'las sesiones en carpetas temporales (sondas) no crean ficha');
+
+// Secretos: se tapan en todas sus formas habituales (las claves de prueba se montan al vuelo)
+const memory = await import('../plugin/scripts/memory.mjs');
+const J = (...p) => p.join('');
+const leaks = [
+  '{"password": "hunter2"}', 'password: "mi clave larga y segura"', 'mysql --password hunter2 -u root', 'postgres://admin:s3cr3tpass@db.local/app',
+  J('sk', '_live_', 'abcdefghij1234567890'), J('xox', 'b-', '123456789012-abcdefghijkl'), J('AI', 'za', 'SyA1234567890abcdefghijklmnopqrstuv'),
+  'Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==', J('-----BEGIN ', 'PRIVATE KEY-----\nMIIEvQIBADANBg\n-----END ', 'PRIVATE KEY-----'),
+];
+for (const x of leaks) {
+  const out = memory.redact(`usa ${x} ahora`);
+  assert.ok(out.includes('«secreto»'), `tapa: ${x.slice(0, 30)}`);
+  for (const word of ['hunter2', 's3cr3tpass', 'abcdefghij1234567890', 'dXNlcjpwYXNzd29yZDEyMw', 'MIIEvQIBADANBg', 'mi clave larga']) assert.ok(!out.includes(word), `no deja «${word}»`);
+}
+assert.equal(memory.redact('el token de acceso se renueva cada hora'), 'el token de acceso se renueva cada hora', 'no toca texto normal');
+assert.deepEqual(memory.extractPrefs('Siempre responde en español. Este test siempre falla. ¿Siempre tengo que pedirlo?'), ['Siempre responde en español.'], 'solo las órdenes permanentes');
+// Un transcript con líneas raras no rompe nada ni duplica
+const odd = path.join(tmp, 'odd.jsonl');
+fs.writeFileSync(odd, ['null', '42', '"texto"', '{roto', L({ type: 'user', message: null }), L({ type: 'user', message: { role: 'user', content: '<command-name>/clear</command-name>' } }), L({ type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation' } })].join('\n') + '\n');
+assert.equal(trackMem('so1', odd).status, 0, 'líneas raras: el hook termina bien');
+assert.ok(!fs.existsSync(path.join(memData, 'memory', 'lectura-so1.json')) || !fs.readdirSync(path.join(memData, 'memory')).some((x) => /^proj-mem-.*\.json$/.test(x) && JSON.parse(fs.readFileSync(path.join(memData, 'memory', x), 'utf8')).sessions.some((z) => z.s === 'so1')), 'ni comandos ni resúmenes de compactación cuentan como peticiones');
 
 // Aviso de contexto grande: lee solo el final del transcript, avisa una vez por tramo y sale aunque la petición no tenga trabajo
 const um = (id, r) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-5-5', usage: { input_tokens: 10, output_tokens: 200, cache_read_input_tokens: r, cache_creation_input_tokens: 5000 } } });

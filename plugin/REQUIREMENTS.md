@@ -19,14 +19,14 @@ Cada línea del bloque es `repo-de-github  plugin@marketplace`. Para añadir o q
 
 ## Se instalan solos
 
+**La memoria entre sesiones ya viene dentro de `claudeop`** (`scripts/memory.mjs`): no hay nada que instalar. Anota cada sesión (título, qué se pidió, qué archivos se tocaron, cómo acabó) y tus preferencias, y las recuerda al abrir. Todo local, sin tokens; desactivar: `CLAUDEOP_MEMORY=off`.
+
 ```requirements
-thedotmack/claude-mem                claude-mem@thedotmack
 anthropics/claude-plugins-official   context7@claude-plugins-official
 ```
 
 | Plugin | Para qué sirve | Prerrequisitos |
 |---|---|---|
-| [Claude-Mem](https://github.com/thedotmack/claude-mem) | Memoria entre sesiones: guarda lo que hiciste y lo recupera en las siguientes. Es la **única memoria** del sistema, por eso `claudeop` no lleva la suya. | Node 20+ (Bun y uv se instalan solos). Reinicia Claude Code tras instalarlo. |
 | [Context7](https://github.com/upstash/context7) | Documentación **actualizada de las librerías** (versión exacta) para que Claude no invente APIs. Solo 2 herramientas MCP y funciona sin clave. | Ninguno. Las consultas (nombre de la librería y la pregunta) van a `mcp.context7.com`. |
 
 ## Herramientas y ajustes que ahorran tokens (también solos)
@@ -49,6 +49,7 @@ Avisos: rtk solo actúa sobre Bash (no sobre Read/Grep/Glob) y puede ocultar det
 Solapan con algo que ya hay, o **gastan tokens por su cuenta**. Instálalos con `--optional` o añadiendo su línea al bloque de arriba.
 
 ```optional
+thedotmack/claude-mem                claude-mem@thedotmack
 rohitg00/pro-workflow                pro-workflow@pro-workflow
 anthropics/claude-plugins-official   security-guidance@claude-plugins-official
 anthropics/claude-plugins-official   playwright@claude-plugins-official
@@ -59,6 +60,7 @@ agenticnotetaking/arscontexta        arscontexta@agenticnotetaking
 
 | Plugin | Para qué sirve | Por qué es opcional | Prerrequisitos |
 |---|---|---|---|
+| [Claude-Mem](https://github.com/thedotmack/claude-mem) | Memoria con IA: comprime lo que haces y lo busca en sesiones futuras. | `claudeop` **ya trae su memoria integrada** (sin dependencias, sin tokens). Claude-Mem necesita Bun, deja un servicio en segundo plano y usa un modelo para comprimir (gasta tokens). | Node 20+, Bun |
 | [Pro Workflow](https://github.com/rohitg00/pro-workflow) | Tus correcciones se guardan como reglas; `/wrap-up`, `/doctor`, vigilancia de git. | Pesa ~3,6k tokens en **cada** mensaje (decenas de skills y agentes) y solapa con las protecciones, el estado y las medidas de `claudeop`. | — |
 | [security-guidance](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/security-guidance) | Avisa de patrones inseguros al editar y revisa el diff con IA al terminar y en cada commit. | **Gasta tokens por su cuenta** (revisión con Opus, ~0,2 $ por revisión según su documentación) y al arrancar crea un entorno Python con el SDK. Si lo quieres: `SECURITY_REVIEW_MODEL=claude-sonnet-5-5` y `ENABLE_STOP_REVIEW=0`. | Python 3.10+, bash |
 | [Playwright](https://github.com/microsoft/playwright-mcp) | Claude abre un navegador para probar webs. | Sus herramientas MCP están **siempre cargadas**: solo merece la pena en proyectos web. | — |

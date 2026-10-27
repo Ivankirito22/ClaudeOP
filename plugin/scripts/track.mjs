@@ -7,6 +7,7 @@ import path from 'node:path';
 import { DATA, USAGE, CONTEXT, off, readJson, writeJson, sessionFile } from './data.mjs';
 import { recordDuration } from './eta.mjs';
 import { contextTokens } from './ctx.mjs';
+import { updateSession } from './memory.mjs';
 
 const MAX_TRANSCRIPT = 80 * 1024 * 1024;
 const DIAS_30 = 30 * 24 * 3600 * 1000;
@@ -87,6 +88,7 @@ function main() {
     append(rows);
     writeJson(stateFile, now);
     recordContext({ t, s: input.session_id, tok: contextTokens(input.transcript_path) });
+    updateSession({ session_id: input.session_id, cwd: input.cwd, transcript_path: input.transcript_path }); // memoria entre sesiones
 
     // Cuánto ha tardado esta petición (de que el usuario la envía a que Claude termina): alimenta las estimaciones
     const sf = sessionFile(input.session_id);

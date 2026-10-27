@@ -5,7 +5,7 @@
 <br>
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.8.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.9.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Dependencias](https://img.shields.io/badge/dependencias-0-0ea5e9?style=for-the-badge)](package.json)
 [![Tests](https://img.shields.io/badge/tests-120%2B-8b5cf6?style=for-the-badge)](test/plugin.mjs)
@@ -27,6 +27,7 @@ Un plugin para **Claude Code**. Lo instalas una vez y no tienes que aprender nad
 |---|---|
 | 🧠 **Reparte el trabajo** | Lo fácil lo hace un modelo barato (Haiku), lo normal uno medio (Sonnet) y solo lo difícil el caro (Opus). Así pagas menos y acaba antes. |
 | 🛡️ **Vigila el gasto** | Frena lo que dispara los tokens: conversaciones enormes, archivos gigantes, demasiados ayudantes a la vez. |
+| 📝 **Te recuerda** | Cada sesión queda anotada sola (qué pediste, qué se tocó, cómo acabó) y tus preferencias también. La siguiente sesión empieza sabiéndolo, sin que repitas nada. |
 | 📊 **Lo mide** | Te dice cuánto tardará cada tarea y cuánto has gastado y ahorrado de verdad. |
 
 ## 🚀 Instalar
@@ -117,12 +118,12 @@ Mientras tanto, **los vigilantes** miran cada paso. Son scripts pequeños (no us
 
 | Evento | Script | Qué hace |
 |---|---|---|
-| `SessionStart` | `session-start` | Da a Claude las reglas de reparto y lo que tienes instalado; retoma `estado.md`; tras compactar vuelve a dar las recetas. |
+| `SessionStart` | `session-start` | Da a Claude las reglas de reparto y lo que tienes instalado; le entrega la **memoria** de sesiones anteriores y los datos del proyecto (rama, comandos); retoma `estado.md`; tras compactar vuelve a dar las recetas. |
 | `SessionStart` | `bootstrap` | Instala en segundo plano plugins y herramientas que falten (solo al arrancar). |
 | `UserPromptSubmit` | `route` | Reconoce flujos y tecnologías; añade la nota con el ⏱ **solo si hay trabajo**; la receta de un flujo se da **una vez por sesión**; avisa al pasar de ~120k de contexto. |
 | `PreToolUse` | `guard` | Confirma comandos peligrosos · **tope de 6 subagentes por petición (agrupando lo relacionado)** · **frena una vez la lectura entera de archivos de más de 40 KB** · recuerda delegar tras 8 lecturas seguidas. |
 | `SubagentStop` | `track` | Anota los tokens de cada subagente por modelo (asíncrono). |
-| `Stop` | `track` · `notify` | Anota tokens, duración y **tamaño del contexto**; avisa de «terminado» si fue largo (asíncronos). |
+| `Stop` | `track` · `notify` | Anota tokens, duración, **tamaño del contexto** y la **ficha de la sesión** (memoria); avisa de «terminado» si fue largo (asíncronos). |
 | `StopFailure` · `Notification` | `notify` | Avisa si Claude se detiene por un error o espera un permiso. |
 </details>
 
@@ -191,11 +192,20 @@ La primera vez que abres Claude Code, `claudeop` instala **en segundo plano** lo
 
 **Reglas:** una sola vez · sin bloquearte · no toca lo que ya tienes · **lo que quites no vuelve** · si algo falla, 3 intentos con 12 h entre ellos · cada ajuste de `settings.json` solo se pone si no existía y deja copia `.bak`.
 
+### 📝 Memoria entre sesiones (ya va dentro de claudeop)
+
+No hay nada que instalar ni que activar. Cada vez que Claude termina una respuesta, `claudeop` actualiza la **ficha de la sesión** (el título que ya genera Claude Code, qué pediste, qué archivos se tocaron, qué ayudantes se usaron y cómo acabó) y guarda tus **preferencias** cuando las dices («quiero que…», «siempre…», «recuerda que…»). Al abrir la siguiente sesión, Claude recibe un resumen de ~350 tokens con:
+
+- las últimas 4 sesiones **de ese proyecto** (título, resultado y archivos tocados),
+- tus preferencias detectadas,
+- la rama de git, los archivos sin commit y los comandos de test y build.
+
+Sin IA, sin dependencias y **sin gastar tokens**: son lecturas y escrituras de archivos. Todo es local (`~/.claude/plugins/data/`), solo lee lo **nuevo** del historial en cada respuesta, tapa claves y contraseñas, y se apaga con `CLAUDEOP_MEMORY=off`.
+
 ### Plugins de Claude Code
 
 | | Plugin | Qué hace por ti | Coste de contexto |
 |---|---|---|---|
-| 🧠 | [**Claude-Mem**](https://github.com/thedotmack/claude-mem) | **Memoria entre sesiones.** Apunta lo que haces y en la siguiente sesión te devuelve solo lo relevante, en vez de empezar de cero. | ~2k tokens por mensaje |
 | 📚 | [**Context7**](https://github.com/upstash/context7) | **Documentación actualizada de las librerías**, de la versión exacta que usas. Claude consulta la doc real en vez de inventarse una API (menos errores y menos reintentos). Funciona sin clave. | 2 herramientas MCP |
 | 🔎 | **typescript-lsp** y **pyright-lsp** *(oficiales de Anthropic)* | **Entienden el código de verdad.** Claude va a la definición de una función, ve dónde se usa y ve los errores reales del lenguaje, en vez de leer archivos enteros. Instala solo el servidor de TypeScript/JavaScript y, si tienes Python, el de Pyright. | prácticamente nulo |
 
@@ -213,7 +223,7 @@ La primera vez que abres Claude Code, `claudeop` instala **en segundo plano** lo
 
 - **Escribir bien a la primera:** Context7 aporta la API correcta y el LSP el código real → menos lecturas y menos reintentos.
 - **Gastar menos:** rtk comprime lo que sale de los comandos, el autocompactado corta la conversación en 200k y el freno de `claudeop` evita leer archivos enormes enteros.
-- **Recordar y medir:** Claude-Mem guarda lo hecho; ccstatusline y ccusage enseñan lo que gastas; `stats` lo cruza con lo delegado.
+- **Recordar y medir:** la memoria de `claudeop` guarda lo hecho; ccstatusline y ccusage enseñan lo que gastas; `stats` lo cruza con lo delegado.
 - **Mismo criterio de seguridad:** `claudeop` confirma `git push` y comandos peligrosos; nada de lo anterior se salta esa protección.
 
 ### Opcionales (no se instalan solos)
@@ -222,11 +232,12 @@ Se activan con `node plugin/scripts/install-requirements.mjs --optional`. Van ap
 
 | Plugin | Qué hace | Por qué no es automático |
 |---|---|---|
+| [Claude-Mem](https://github.com/thedotmack/claude-mem) | Memoria con IA: comprime lo que haces y lo busca en sesiones futuras. | `claudeop` ya trae su memoria. Claude-Mem necesita Bun, deja un servicio en segundo plano y usa un modelo para comprimir (gasta tokens). |
 | [Pro Workflow](https://github.com/rohitg00/pro-workflow) | Tus correcciones se guardan como reglas; `/wrap-up`, `/doctor`, vigilancia de git. | ~3,6k tokens en **cada** mensaje y solapa con las protecciones y medidas de `claudeop`. |
 | [security-guidance](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/security-guidance) | Avisa de patrones inseguros al editar y revisa el diff con IA. | Su revisión con Opus **cuesta tokens** (~0,2 $ por revisión según su doc) y al arrancar monta un entorno Python. Si lo quieres: `SECURITY_REVIEW_MODEL=claude-sonnet-5-5` y `ENABLE_STOP_REVIEW=0`. |
 | [Playwright](https://github.com/microsoft/playwright-mcp) | Claude abre un navegador y prueba tu web. | Sus herramientas MCP están siempre cargadas: solo en proyectos web. |
 | code-review | Revisa un pull request con varios agentes. | `claudeop:revisor` ya revisa el diff local. |
-| [Auto Harness](https://github.com/redker56/auto-harness) · [Ars Contexta](https://github.com/agenticnotetaking/arscontexta) | Trabajo largo por sprints · un «segundo cerebro» de notas. | Solapan con los flujos de `claudeop` y con Claude-Mem. |
+| [Auto Harness](https://github.com/redker56/auto-harness) · [Ars Contexta](https://github.com/agenticnotetaking/arscontexta) | Trabajo largo por sprints · un «segundo cerebro» de notas. | Solapan con los flujos y con la memoria de `claudeop`. |
 
 > ⚠️ Son herramientas de terceros que ejecutan hooks o servidores en tu máquina: revisa su código si te importa. Context7 envía a `mcp.context7.com` el nombre de la librería y tu pregunta. Desactivar todo: `CLAUDEOP_NO_INSTALL=1`; solo herramientas y ajustes: `CLAUDEOP_NO_TOOLS=1`.
 
@@ -241,6 +252,7 @@ Todo es opcional. Variables de entorno (o la propia frase):
 | Apagar el plugin | `CLAUDEOP=off` |
 | Que una petición no delegue | «sin delegar», «no uses agentes», «hazlo tú solo» |
 | No instalar plugins / herramientas | `CLAUDEOP_NO_INSTALL=1` · `CLAUDEOP_NO_TOOLS=1` |
+| Apagar la memoria entre sesiones | `CLAUDEOP_MEMORY=off` |
 | Sin confirmaciones de `git push`… | `CLAUDEOP_GUARD=off` |
 | Tope de subagentes por petición (6) | `CLAUDEOP_MAX_AGENTS=8` |
 | Freno a lecturas grandes (40 KB; 0 = sin freno) | `CLAUDEOP_BIG_READ_KB=100` |
@@ -248,7 +260,7 @@ Todo es opcional. Variables de entorno (o la propia frase):
 
 Y hablando con Claude: **«¿cuánto he delegado esta semana?»** → informe de uso, tiempos y contexto (`node plugin/scripts/stats.mjs [--dias N] [--todo] [--json] [--precios haiku=1,sonnet=3,opus=15]`) · **«revisa claudeop»** → diagnóstico (`doctor.mjs`) · **«¿cuánto gasto por día?»** → `ccusage`.
 
-**Privacidad:** todo es local. Los registros (`usage.jsonl`, `durations.jsonl`, `context.jsonl`) viven en `~/.claude/plugins/data/` y solo guardan modelos, agentes, tokens y duraciones, **nunca el contenido** de tus mensajes.
+**Privacidad:** todo es local, en `~/.claude/plugins/data/`. Los registros de uso (`usage.jsonl`, `durations.jsonl`, `context.jsonl`) solo guardan modelos, agentes, tokens y duraciones. **La memoria sí guarda fragmentos de lo que pides** (unas 150 letras de lo que pediste, el título, los archivos tocados y tus preferencias) para poder recordarlos; las claves y contraseñas se tapan antes de guardar, no sale de tu equipo y se borra con `CLAUDEOP_MEMORY=off` y borrando la carpeta `memory/`.
 
 ---
 
@@ -315,7 +327,7 @@ plugin/                       lo que se instala
 ├── scripts/
 │   ├── route · session-start · guard · track · notify     los hooks
 │   ├── bootstrap · tools · requirements · install-requirements   instaladores
-│   ├── ctx · eta · flows · intent · stack · lib · data     piezas comunes
+│   ├── memory · facts · ctx · eta · flows · intent · stack · lib · data   piezas comunes
 │   └── stats · doctor                                      informes
 └── REQUIREMENTS.md           lo que se instala solo
 assets/                       banner, architecture y savings (.svg de este README)
