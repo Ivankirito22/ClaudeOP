@@ -6,6 +6,7 @@ import path from 'node:path';
 const CFG = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 export const DATA = process.env.CLAUDE_PLUGIN_DATA || path.join(CFG, 'plugins', 'data', 'claudeop');
 export const USAGE = path.join(DATA, 'usage.jsonl');
+export const CONTEXT = path.join(DATA, 'context.jsonl');
 
 export const off = () => /^(off|0|false)$/i.test(process.env.CLAUDEOP || '');
 export const tierOf = (model) => (/haiku/i.test(model) ? 'haiku' : /sonnet/i.test(model) ? 'sonnet' : /opus/i.test(model) ? 'opus' : 'otro');

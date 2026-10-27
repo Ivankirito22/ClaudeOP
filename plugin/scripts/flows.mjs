@@ -3,8 +3,8 @@
 export const FLOWS = [
   {
     cmd: '/feature', label: 'Feature completa',
-    short: 'criterio de «hecho» → explorador (+investigador si falta documentación) → arquitecto si toca 3+ archivos → implementar → probador+revisor → arreglar → verificador',
-    body: '0 Criterio de «hecho» (1-2 líneas). 1 ENTENDER en paralelo: explorador (código, convenciones, tests) + investigador solo si falta documentación. 2 DISEÑAR: arquitecto solo si toca 3+ archivos o hay una decisión de diseño. 3 IMPLEMENTAR: tú o `especialista` (lo mecánico, a limpiador). 4 COMPROBAR en paralelo: probador (con tests nuevos si faltan) + revisor (diff). 5 ARREGLAR lo que salga. 6 documentador solo si cambió el comportamiento. 7 verificador contra el criterio. Cierre: qué hace, archivos, tests y pendientes (≤10 líneas).',
+    short: 'criterio de «hecho» → explorador (+investigador si falta documentación) → arquitecto si toca 3+ archivos → implementar → probador+revisor (PASS/FAIL del criterio) → arreglar → verificador solo si hubo P0/P1 o 3+ archivos',
+    body: '0 Criterio de «hecho» (1-2 líneas). 1 ENTENDER en paralelo: explorador (código, convenciones, tests) + investigador solo si falta documentación. 2 DISEÑAR: arquitecto solo si toca 3+ archivos o hay una decisión de diseño. 3 IMPLEMENTAR: tú o `especialista` (lo mecánico, a limpiador). 4 COMPROBAR en paralelo: probador (con tests nuevos si faltan) + revisor (diff; pásale el criterio de «hecho» y que abra con PASS/FAIL por criterio). 5 ARREGLAR lo que salga. 6 documentador solo si cambió el comportamiento. 7 verificador solo si el revisor halló P0/P1, se tocaron 3+ archivos o es arriesgado; si no, basta el PASS del revisor. Cierre: qué hace, archivos, tests y pendientes (≤10 líneas).',
   },
   {
     cmd: '/bugprofundo', label: 'Bug a fondo',
@@ -13,8 +13,8 @@ export const FLOWS = [
   },
   {
     cmd: '/refactor', label: 'Refactor seguro',
-    short: 'tests de línea base → mapa de impacto → plan → pasos pequeños con tests entre medias → revisor+verificador',
-    body: 'El comportamiento NO cambia. 1 LÍNEA BASE: probador ahora (si falta cobertura, tests de caracterización mínimos antes). 2 IMPACTO: explorador lista usos y dependencias. 3 PLAN: arquitecto solo si afecta a 4+ archivos o a APIs públicas (pasos pequeños e independientes). 4 EJECUTAR por pasos: lo mecánico a limpiador, lo delicado tú; probador tras cada paso; si uno rompe algo, revierte ese paso. 5 revisor (diff) + verificador (mismos tests en verde). Cierre: qué cambió, qué quedó igual y tests (≤8 líneas).',
+    short: 'tests de línea base → mapa de impacto → plan → pasos pequeños con tests entre medias → revisor (+verificador si es grande)',
+    body: 'El comportamiento NO cambia. 1 LÍNEA BASE: probador ahora (si falta cobertura, tests de caracterización mínimos antes). 2 IMPACTO: explorador lista usos y dependencias. 3 PLAN: arquitecto solo si afecta a 4+ archivos o a APIs públicas (pasos pequeños e independientes). 4 EJECUTAR por pasos: lo mecánico a limpiador, lo delicado tú; probador tras cada paso; si uno rompe algo, revierte ese paso. 5 revisor (diff) y, solo si tocó 4+ archivos o APIs públicas, verificador (mismos tests en verde). Cierre: qué cambió, qué quedó igual y tests (≤8 líneas).',
   },
   {
     cmd: '/decidir', label: 'Investigar y decidir',
@@ -28,8 +28,8 @@ export const FLOWS = [
   },
   {
     cmd: '/pulir', label: 'Pulir lo último',
-    short: 'segunda pasada sobre lo recién cambiado: revisor+probador → corregir → verificador',
-    body: 'Solo lo cambiado en esta sesión (git diff). En paralelo: revisor + probador. Corrige tú lo que reporten (lo mecánico, a limpiador) y verificador confirma. Si no hay nada que corregir, dilo en una línea.',
+    short: 'segunda pasada sobre lo recién cambiado: revisor+probador → corregir (verificador solo si hubo P0/P1)',
+    body: 'Solo lo cambiado en esta sesión (git diff). En paralelo: revisor + probador. Corrige tú lo que reporten (lo mecánico, a limpiador) y verificador solo si hubo arreglos P0/P1. Si no hay nada que corregir, dilo en una línea.',
   },
   {
     cmd: '/rendimiento', label: 'Cazar cuellos de botella',

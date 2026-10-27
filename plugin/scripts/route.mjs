@@ -5,10 +5,17 @@ import { FLOWS, GENERAL } from './flows.mjs';
 import { detectCmds, norm, MAX_FLOWS } from './intent.mjs';
 import { specialistsFor, SPEC_KEYS, AGENT_TECHS, SPECIALISTS, guideFor } from './stack.mjs';
 import { NAME, loadCatalog, queryStems, queryWords, rankItems, rankMcp } from './lib.mjs';
-import { writeJson, sessionFile } from './data.mjs';
+import { readJson, writeJson, sessionFile } from './data.mjs';
 import { estimate, range } from './eta.mjs';
+import { contextTokens, contextWarning } from './ctx.mjs';
 
-const emit = (text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }));
+// El aviso de contexto grande va delante de cualquier nota, y sale solo aunque la petición no tenga trabajo
+let pendingWarn = '';
+let emitted = false;
+const emit = (text) => {
+  emitted = true;
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [pendingWarn, text].filter(Boolean).join('\n') } }));
+};
 
 const SKIP_FLOWS = new Set(['/plugins']); // «el plugin» aquí casi siempre es otra cosa
 const EDIT_FLOWS = new Set(['/feature', '/bugprofundo', '/refactor', '/tests', '/optimizar', '/limpiar', '/rendimiento']);
@@ -39,8 +46,13 @@ function main() {
   if (INTERNAL.test(prompt)) return;
   const t = norm(prompt).trim();
 
+  // Contexto grande = cada mensaje cuesta mucho: se avisa una vez por tramo (el tramo avisado se guarda en el estado de la sesión)
+  const prev = readJson(sessionFile(input.session_id), {});
+  const w = input.transcript_path ? contextWarning(contextTokens(input.transcript_path), prev.warned || 0) : { text: '', bucket: prev.warned || 0 };
+  pendingWarn = w.text;
+
   // Estado de esta petición: cuándo empezó (para medir cuánto tarda; track.mjs lo cierra en Stop) y contadores del guard
-  const startState = (extra = {}) => { if (input.prompt_id) writeJson(sessionFile(input.session_id), { prompt: input.prompt_id, reads: 0, t0: Date.now(), kind: null, ...extra }); };
+  const startState = (extra = {}) => { if (input.prompt_id) writeJson(sessionFile(input.session_id), { prompt: input.prompt_id, reads: 0, agents: 0, t0: Date.now(), kind: null, warned: w.bucket, sent: prev.sent || [], ...extra }); };
   startState();
   if (NO_DELEGATE.test(t)) {
     startState({ quiet: true }); // «sin delegar»: que tampoco el guard le recuerde a Claude que delegue en esta petición
@@ -83,7 +95,8 @@ function main() {
   // Tiempo: de qué tipo es la tarea (para anotar cuánto tarda de verdad) y cuánto se espera que tarde
   const kinds = [...flows.map((a) => a.cmd), ...own.map(() => 'propio')];
   if (!kinds.length) kinds.push('general');
-  startState({ kind: [...kinds].sort().join('+') });
+  const sentBefore = new Set(prev.sent || []);
+  startState({ kind: [...kinds].sort().join('+'), sent: [...new Set([...sentBefore, ...flows.map((a) => a.cmd), ...(flows.length || own.length ? [] : ['general'])])] });
   const eta = estimate(kinds);
 
   const lines = [
@@ -96,10 +109,10 @@ function main() {
   } else if (flows.length || own.length) {
     const labels = [...flows.map((a) => a.label), ...own.map((f) => f.label)];
     lines.push(`Flujos: ${labels.join(' + ')}${labels.length > 1 ? ' — combínalos en UN solo trabajo (un explorador, UN verificador al final, lo de solo lectura después de implementar)' : ''}. Anuncia cada fase en una línea. Si nombra además otros flujos del catálogo (aunque tenga faltas de ortografía), añádelos.`);
-    for (const a of flows) lines.push(`- ${a.label}: ${a.body}`);
+    for (const a of flows) lines.push(sentBefore.has(a.cmd) ? `- ${a.label}: receta ya dada en esta sesión; síguela igual.` : `- ${a.label}: ${a.body}`);
     for (const f of own) lines.push(`- ${f.label} (flujo propio): ${f.body}`);
   } else {
-    lines.push(`Sin flujo concreto, método general: ${GENERAL.body}`);
+    lines.push(sentBefore.has('general') ? 'Sin flujo concreto: método general (ya dado en esta sesión).' : `Sin flujo concreto, método general: ${GENERAL.body}`);
   }
 
   // Especialistas: por lo que escribe; si no dice ninguna tecnología y va a editar, los 2 del proyecto
@@ -122,4 +135,4 @@ function main() {
   emit(lines.join('\n'));
 }
 
-try { main(); } catch { /* un hook nunca debe romper el mensaje del usuario */ }
+try { main(); if (pendingWarn && !emitted) emit(''); } catch { /* un hook nunca debe romper el mensaje del usuario */ }

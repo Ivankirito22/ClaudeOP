@@ -47,6 +47,7 @@ const env = {
   ...(REAL ? {} : { CLAUDE_CONFIG_DIR: cfg, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data'), PATH: path.dirname(process.execPath) }), // sin PATH a «claude» → plan B de escaneo
 };
 delete env.CLAUDEOP;
+env.CLAUDEOP_NO_TOOLS = '1'; // los tests nunca instalan rtk ni tocan la barra de estado real
 
 const run = (script, input, extraEnv = {}) => {
   const r = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', script)], { input: JSON.stringify(input), encoding: 'utf8', env: { ...env, ...extraEnv } });
@@ -169,6 +170,93 @@ assert.ok(outs[7]?.additionalContext.includes('claudeop:explorador'), 'salta a l
 assert.equal(Array.from({ length: 12 }, () => guardHook('Read', { file_path: 'a.js' }, { prompt_id: 'p3', agent_id: 'sub1' })).filter(Boolean).length, 0, 'las lecturas de un subagente no cuentan');
 run('route.mjs', { cwd, prompt: 'optimiza el proyecto sin delegar', prompt_id: 'p4', session_id: 's1' }, { CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-guard') });
 assert.equal(Array.from({ length: 12 }, () => guardHook('Read', { file_path: 'a.js' }, { prompt_id: 'p4' })).filter(Boolean).length, 0, '«sin delegar» también silencia el recordatorio');
+
+// Herramientas externas (rtk, barra de estado): reglas de instalación sin ejecutar nada real
+const tools = await import('../plugin/scripts/tools.mjs');
+const sl = path.join(tmp, 'sl', 'settings.json');
+w(sl, JSON.stringify({ model: 'sonnet' }));
+assert.equal(tools.setStatusLine(sl).ok, true);
+const slJson = JSON.parse(fs.readFileSync(sl, 'utf8'));
+assert.equal(slJson.model, 'sonnet', 'conserva el resto de la configuración');
+assert.equal(slJson.statusLine.command, tools.STATUSLINE, 'pone la barra de estado');
+assert.ok(fs.existsSync(sl + '.claudeop.bak'), 'deja copia de seguridad');
+w(sl, JSON.stringify({ statusLine: { type: 'command', command: 'mi-barra' } }));
+tools.setStatusLine(sl);
+assert.equal(JSON.parse(fs.readFileSync(sl, 'utf8')).statusLine.command, 'mi-barra', 'nunca pisa la barra del usuario');
+w(sl, '{roto');
+assert.equal(tools.setStatusLine(sl).ok, false, 'un settings.json ilegible no se toca');
+assert.equal(fs.readFileSync(sl, 'utf8'), '{roto');
+assert.ok(tools.hasRtkHook({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'rtk hook claude' }] }] } }), 'detecta el hook de rtk');
+assert.ok(!tools.hasRtkHook({ hooks: { PreToolUse: [{ hooks: [{ command: 'node guard.mjs' }] }] } }), 'sin hook de rtk');
+assert.deepEqual(tools.pending({}).map((x) => x.key), ['rtk', 'ccstatusline', 'autocompact'], 'al principio toca instalar las 3');
+assert.equal(tools.pending({ rtk: { ok: true }, ccstatusline: { ok: true }, autocompact: { ok: true } }).length, 0, 'lo ya hecho no se repite (aunque el usuario lo quite)');
+assert.equal(tools.pending({ rtk: { ok: false, tries: 3, ts: 0 }, ccstatusline: { ok: false, tries: 1, ts: Date.now() }, autocompact: { ok: true } }).length, 0, 'máx. 3 intentos y 12 h entre ellos');
+assert.equal(tools.pending({ rtk: { ok: false, tries: 1, ts: 0 }, ccstatusline: { ok: true }, autocompact: { ok: true } }).length, 1, 'un fallo se reintenta pasadas 12 h');
+const dryTools = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'tools.mjs'), '--dry-run'], { encoding: 'utf8', env });
+assert.equal((dryTools.stdout.match(/instalaría/g) || []).length, 3, '--dry-run solo muestra');
+assert.equal(tools.disabled(), false);
+// Autocompactado: pone el tope solo si no hay uno, y conserva el resto
+const ac = path.join(tmp, 'ac', 'settings.json');
+w(ac, JSON.stringify({ model: 'sonnet' }));
+tools.setAutoCompact(ac);
+assert.deepEqual([JSON.parse(fs.readFileSync(ac, 'utf8')).autoCompactWindow, JSON.parse(fs.readFileSync(ac, 'utf8')).model], [200000, 'sonnet'], 'autocompactado a 200k, sin tocar lo demás');
+w(ac, JSON.stringify({ autoCompactWindow: 500000 }));
+tools.setAutoCompact(ac);
+assert.equal(JSON.parse(fs.readFileSync(ac, 'utf8')).autoCompactWindow, 500000, 'nunca pisa el valor del usuario');
+
+// Tope de subagentes por petición: el 5.º se bloquea; en otra petición vuelve a empezar; los subagentes no cuentan; CLAUDEOP_MAX_AGENTS lo cambia
+const spawns = Array.from({ length: 6 }, () => guardHook('Agent', { subagent_type: 'claudeop:explorador' }, { prompt_id: 'pa1', session_id: 'sa' }));
+assert.equal(spawns.filter((o) => o?.permissionDecision === 'deny').length, 2, 'bloquea del 5.º en adelante');
+assert.equal(spawns[3], null, 'el 4.º pasa');
+assert.equal(guardHook('Agent', {}, { prompt_id: 'pa2', session_id: 'sa' }), null, 'petición nueva: contador a cero');
+assert.equal(guardHook('Agent', {}, { prompt_id: 'pa3', session_id: 'sa', agent_id: 'sub1' }), null, 'un subagente no cuenta');
+assert.equal(Array.from({ length: 3 }, () => guardHook('Agent', {}, { prompt_id: 'pa4', session_id: 'sa' }, { CLAUDEOP_MAX_AGENTS: '2' })).filter((o) => o?.permissionDecision === 'deny').length, 1, 'el tope se puede cambiar');
+assert.match(hooks.PreToolUse[0].matcher, /Agent/, 'el guard está registrado para Agent');
+
+// Lectura entera de un archivo grande: se frena UNA vez por archivo; con offset/limit, archivos pequeños y binarios pasa
+const bigf = path.join(tmp, 'grande.txt');
+fs.writeFileSync(bigf, 'x'.repeat(60 * 1024));
+const smallf = path.join(tmp, 'pequeno.txt');
+fs.writeFileSync(smallf, 'hola');
+const rd = (p, extra = {}, ti = {}) => guardHook('Read', { file_path: p, ...ti }, { prompt_id: 'pb1', session_id: 'sb', ...extra });
+assert.equal(rd(bigf)?.permissionDecision, 'deny', 'frena la lectura entera de un archivo grande');
+assert.equal(rd(bigf), null, 'la segunda petición del mismo archivo pasa');
+assert.equal(rd(bigf, { prompt_id: 'pb2' }, { limit: 50 }), null, 'con limit pasa');
+assert.equal(rd(smallf, { prompt_id: 'pb3' }), null, 'un archivo pequeño pasa');
+assert.equal(rd(path.join(tmp, 'foto.png'), { prompt_id: 'pb4' }), null, 'un binario no se frena');
+assert.equal(rd(bigf, { prompt_id: 'pb5', agent_id: 'sub1' }), null, 'los subagentes leen lo que necesiten');
+assert.equal(rd(bigf, { prompt_id: 'pb6', session_id: 'sb2' }, {})?.permissionDecision, 'deny', 'otra petición vuelve a frenar');
+assert.equal(guardHook('Read', { file_path: bigf }, { prompt_id: 'pb7', session_id: 'sb3' }, { CLAUDEOP_BIG_READ_KB: '0' }), null, 'CLAUDEOP_BIG_READ_KB=0 lo desactiva');
+
+// La receta de un flujo se da una vez por sesión; tras compactar se vuelve a dar
+const recData = path.join(tmp, 'data-recipe');
+const recipe = (pid) => run('route.mjs', { cwd, prompt: 'optimiza el proyecto', prompt_id: pid, session_id: 'sr' }, { CLAUDE_PLUGIN_DATA: recData });
+const first = recipe('r1');
+const second = recipe('r2');
+assert.ok(first.includes('Optimizar') && second.includes('receta ya dada'), 'la 2.ª vez solo el nombre del flujo');
+assert.ok(second.length < first.length - 200, 'y la nota es bastante más corta');
+run('session-start.mjs', { cwd, source: 'compact', session_id: 'sr' }, { CLAUDE_PLUGIN_DATA: recData });
+assert.ok(!recipe('r3').includes('receta ya dada'), 'tras compactar se vuelve a dar la receta');
+
+// Aviso de contexto grande: lee solo el final del transcript, avisa una vez por tramo y sale aunque la petición no tenga trabajo
+const um = (id, r) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-5-5', usage: { input_tokens: 10, output_tokens: 200, cache_read_input_tokens: r, cache_creation_input_tokens: 5000 } } });
+const big = path.join(tmp, 'big.jsonl');
+fs.writeFileSync(big, ['{"type":"user"}', um('b1', 150000)].join('\n'));
+const ctxData = path.join(tmp, 'data-ctx');
+const warnOf = (pid, tp) => { const o = run('route.mjs', { cwd, prompt: 'gracias', prompt_id: pid, session_id: 'sc', transcript_path: tp }, { CLAUDE_PLUGIN_DATA: ctxData }); return o || ''; };
+assert.match(warnOf('c1', big), /155k tokens/, 'avisa con el tamaño del contexto');
+assert.equal(warnOf('c2', big), '', 'no repite el aviso en el mismo tramo');
+fs.appendFileSync(big, '\n' + um('b2', 230000));
+assert.match(warnOf('c3', big), /235k tokens/, 'avisa otra vez al subir de tramo');
+// Al terminar cada respuesta se anota el tamaño del contexto; stats saca mediana y máximo
+const ctxRun = path.join(tmp, 'data-ctxrec');
+const trkMain = (tp) => spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'track.mjs'), 'main'], { input: JSON.stringify({ session_id: 'st', transcript_path: tp }), encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: ctxRun } });
+trkMain(big);
+const st1 = JSON.parse(spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'stats.mjs'), '--json'], { encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_DATA: ctxRun } }).stdout);
+assert.deepEqual([st1.contexto.turnos, st1.contexto.maximo], [1, 235010], 'stats muestra el contexto por turno');
+const small = path.join(tmp, 'small.jsonl');
+fs.writeFileSync(small, um('s1', 20000));
+assert.equal(warnOf('c4', small), '', 'contexto pequeño: sin aviso');
 
 // ---- Medición: lee el transcript (con mensajes repetidos) y anota por modelo; stats lo resume ----
 const msg = (id, model, i, o, r, c) => JSON.stringify({ type: 'assistant', message: { id, model, usage: { input_tokens: i, output_tokens: o, cache_read_input_tokens: r, cache_creation_input_tokens: c } } });

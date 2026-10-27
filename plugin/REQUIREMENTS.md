@@ -29,6 +29,19 @@ rohitg00/pro-workflow            pro-workflow@pro-workflow
 | [Claude-Mem](https://github.com/thedotmack/claude-mem) | Memoria entre sesiones: guarda lo que hiciste y lo recupera en las siguientes. Es la **única memoria** del sistema, por eso `claudeop` no lleva la suya. | Node 20+ (Bun y uv se instalan solos). Reinicia Claude Code tras instalarlo. |
 | [Pro Workflow](https://github.com/rohitg00/pro-workflow) | Flujo de trabajo con hooks y skills (`/doctor`, `/wrap-up`). | Si `/doctor` dice `KB: missing`: `npm install && npm run build` en la carpeta del plugin. |
 
+## Herramientas y ajustes que ahorran tokens (también solos)
+
+No son plugins de Claude, así que no van en los bloques de arriba: las instala `scripts/tools.mjs` desde el arranque, con las mismas reglas (una vez, en segundo plano, 3 intentos, lo que quites no vuelve). Desactivar: `CLAUDEOP_NO_TOOLS=1`.
+
+| Herramienta | Qué hace | Qué toca |
+|---|---|---|
+| [rtk](https://github.com/rtk-ai/rtk) | Comprime la salida de los comandos de Bash antes de que llegue al contexto (según su README, 60–90 %). | `winget install rtk-ai.rtk` (o `brew install rtk`) y `rtk init -g --hook-only`: añade **un** hook PreToolUse de Bash a `settings.json` (con copia `.bak`), sin RTK.md ni nada en CLAUDE.md. Se quita con `rtk init -g --uninstall`. |
+| [ccstatusline](https://github.com/sirmalloc/ccstatusline) | Barra de estado con modelo, **contexto en tokens** y rama. | Pone `statusLine` en `settings.json` (versión fija) **solo si no tienes ya una**; copia `settings.json.claudeop.bak`. |
+| Autocompactado | Tope al contexto por turno: una sesión sin tope llegó a 450k tokens por mensaje. | Pone `autoCompactWindow: 200000` en `settings.json` **solo si no lo tienes** (copia `.claudeop.bak`). El umbral es el menor entre 200k y la ventana del modelo. Se cambia con `/autocompact`. |
+| [ccusage](https://github.com/ryoppippi/ccusage) | Tokens y coste por día desde tus logs. | Nada: se ejecuta con `npx -y ccusage@20.0.45 daily` cuando se pide. |
+
+Avisos: rtk solo actúa sobre Bash (no sobre Read/Grep/Glob) y puede ocultar detalle al depurar: `rtk proxy <comando>` da la salida completa. Hay otro proyecto llamado «rtk» en crates.io; comprueba que es el bueno con `rtk gain`. Tras instalarlo, reinicia la terminal (winget cambia el PATH).
+
 ## Opcionales (no se instalan solos)
 
 Hacen lo mismo que alguna pieza de `claudeop` o de los de arriba. Tenerlos todos a la vez gasta más contexto en cada petición y puede dar instrucciones contradictorias, por eso van aparte. Instálalos con `--optional` o añadiendo su línea al bloque de arriba.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FLOW_CATALOG } from './flows.mjs';
 import { NAME, buildCatalog, frontmatter } from './lib.mjs';
+import { readJson, writeJson, sessionFile } from './data.mjs';
 
 const ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const emit = (text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));
@@ -34,7 +35,11 @@ function main() {
   if (/^(off|0|false)$/i.test(process.env.CLAUDEOP || '')) return;
   let cwd = process.cwd();
   let source = 'startup';
-  try { const i = JSON.parse(fs.readFileSync(0, 'utf8')); cwd = i.cwd || cwd; source = i.source || source; } catch { /* sin stdin */ }
+  try {
+    const i = JSON.parse(fs.readFileSync(0, 'utf8'));
+    cwd = i.cwd || cwd; source = i.source || source;
+    if (i.session_id && /compact|clear/.test(source)) { const sf = sessionFile(i.session_id); const st = readJson(sf); if (st?.sent) writeJson(sf, { ...st, sent: [] }); }
+  } catch { /* sin stdin */ }
 
   // Se reutiliza el catálogo si es reciente y la configuración de plugins no ha cambiado (12 h al arrancar, 1 día en /clear, /compact y resume)
   const cat = buildCatalog(cwd, (source === 'startup' ? 12 : 24) * 3600 * 1000);
@@ -48,7 +53,7 @@ function main() {
   const text = `[${NAME}] Orquestación multi-modelo AUTOMÁTICA. El usuario no usa comandos: deduce qué quiere (aunque escriba con faltas o jerga) y delega DENTRO de la misma petición con la herramienta Agent (subagent_type = \`${NAME}:<nombre>\`), siempre en el modelo más barato que lo haga bien: hacerlo tú cuesta dinero al usuario.
 
 Agentes: haiku (barato) ${r.haiku.join(', ')} · sonnet ${r.sonnet.join(', ')} · opus (caro) ${r.opus.join(', ')}.
-Reparto: leer/buscar en mucho código → explorador (no leas muchos archivos tú) · cambios mecánicos → limpiador, con rutas exactas · tests/build/lint → probador · documentación → documentador · web → investigador · bug no evidente → depurador (causa raíz ANTES de parchear) · revisar un diff → revisor · decisión difícil o algo que ya falló → arquitecto · más de ~20 líneas en una tecnología → \`especialista\` (blender y juego tienen el suyo; la nota trae su guía de estilo para pegarla en el prompt). Tú haces la implementación normal y la integración final. Pasos independientes: UN solo mensaje con todas las llamadas Agent; nunca en paralelo agentes que editen los mismos archivos. Los subagentes no ven esta conversación: dales instrucciones completas y comprueba lo que devuelven.
+Reparto: leer/buscar en mucho código → explorador (no leas muchos archivos tú) · cambios mecánicos → limpiador, con rutas exactas · tests/build/lint → probador · documentación → documentador · web → investigador · bug no evidente → depurador (causa raíz ANTES de parchear) · revisar un diff → revisor · decisión difícil o algo que ya falló → arquitecto · más de ~20 líneas en una tecnología → \`especialista\` (blender y juego tienen el suyo; la nota trae su guía de estilo para pegarla en el prompt). Tú haces la implementación normal y la integración final. Pasos independientes: UN solo mensaje con las llamadas Agent (máximo 4 por petición: el hook bloquea el 5.º; agrupa por área, no por archivo); nunca en paralelo agentes que editen los mismos archivos. Cada subagente cuesta ~6k tokens solo por arrancar: lo que harías en 1-3 llamadas, hazlo tú. Los subagentes no ven esta conversación: dales instrucciones completas y comprueba lo que devuelven.
 
 ${FLOW_CATALOG}
 ${customs.length ? `Flujos propios del usuario:\n${customs.join('\n')}\n` : ''}Cada petición con trabajo llega con una nota «[${NAME} · automático]» (flujos, especialistas, MCP, skills y agentes que encajan): síguela.
@@ -56,7 +61,7 @@ ${customs.length ? `Flujos propios del usuario:\n${customs.join('\n')}\n` : ''}C
 Calidad: en tareas no triviales, criterio de «hecho» en una línea y compruébalo al final. Preguntas y cambios pequeños, directos y sin flujo. Anuncia cada delegación en una línea.
 Seguridad: git push, reset --hard y clean piden confirmación al usuario (hook); no los intentes sin que lo pida.
 Tokens: no releas archivos; Grep/Glob antes de Read con offset/limit; no imprimas archivos ni logs enteros; respuestas cortas, resultado primero.
-Si preguntan cuánto ahorra o delega: \`node "${ROOT}/scripts/stats.mjs"\`. Si algo del plugin no va: \`node "${ROOT}/scripts/doctor.mjs"\` y resume el resultado.${cat.stack.summary ? `\nStack: ${cat.stack.summary}.` : ''}${mcp.length ? `\nMCP del usuario: ${mcp.join(', ')}. Si la tarea es de su herramienta, úsalos en vez de improvisar scripts (si salen diferidos, cárgalos con ToolSearch).` : ''}
+Si preguntan cuánto ahorra o delega: \`node "${ROOT}/scripts/stats.mjs"\`; coste real en tokens y dinero por día: npx -y ccusage@20.0.45 daily. Si algo del plugin no va: \`node "${ROOT}/scripts/doctor.mjs"\` y resume el resultado.${cat.stack.summary ? `\nStack: ${cat.stack.summary}.` : ''}${mcp.length ? `\nMCP del usuario: ${mcp.join(', ')}. Si la tarea es de su herramienta, úsalos en vez de improvisar scripts (si salen diferidos, cárgalos con ToolSearch).` : ''}
 También hay ${cat.skills.length} skills/comandos, ${cat.agents.length} agentes y ${viaPlugins} MCP de plugins: cada nota te indica los que encajan.${pendingState(cwd)}`;
   emit(text);
 }

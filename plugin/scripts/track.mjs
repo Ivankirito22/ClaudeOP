@@ -4,8 +4,9 @@
 //   node track.mjs main  ← Stop (lee el transcript de la sesión y anota lo nuevo desde la última vez)
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA, USAGE, off, readJson, writeJson, sessionFile } from './data.mjs';
+import { DATA, USAGE, CONTEXT, off, readJson, writeJson, sessionFile } from './data.mjs';
 import { recordDuration } from './eta.mjs';
+import { contextTokens } from './ctx.mjs';
 
 const MAX_TRANSCRIPT = 80 * 1024 * 1024;
 const DIAS_30 = 30 * 24 * 3600 * 1000;
@@ -42,6 +43,17 @@ function append(rows) {
   }
 }
 
+// Tamaño del contexto al terminar cada respuesta (lo que se reenvía en el turno siguiente): stats.mjs saca mediana y máximo
+function recordContext(row) {
+  if (!row.tok) return;
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.appendFileSync(CONTEXT, JSON.stringify(row) + '\n');
+  if (fs.statSync(CONTEXT).size > 512 * 1024) {
+    const lines = fs.readFileSync(CONTEXT, 'utf8').trim().split('\n');
+    fs.writeFileSync(CONTEXT, lines.slice(-Math.floor(lines.length / 2)).join('\n') + '\n');
+  }
+}
+
 function sweep() {
   try {
     for (const f of fs.readdirSync(DATA)) {
@@ -74,6 +86,7 @@ function main() {
     }
     append(rows);
     writeJson(stateFile, now);
+    recordContext({ t, s: input.session_id, tok: contextTokens(input.transcript_path) });
 
     // Cuánto ha tardado esta petición (de que el usuario la envía a que Claude termina): alimenta las estimaciones
     const sf = sessionFile(input.session_id);

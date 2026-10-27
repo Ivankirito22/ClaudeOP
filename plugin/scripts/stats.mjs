@@ -4,7 +4,7 @@
 //   node stats.mjs --precios haiku=1,sonnet=3,opus=15 → además un índice de coste relativo con TUS precios
 //   node stats.mjs --json          → salida en JSON
 import fs from 'node:fs';
-import { USAGE, tierOf } from './data.mjs';
+import { USAGE, CONTEXT, tierOf } from './data.mjs';
 import { readDurations, spread, fmt as fmtTime } from './eta.mjs';
 import { FLOWS } from './flows.mjs';
 
@@ -20,6 +20,18 @@ try {
     try { const r = JSON.parse(l); if (r.t >= since) rows.push(r); } catch { /* línea rota */ }
   }
 } catch { /* sin registro todavía */ }
+
+// Contexto por turno: la cifra que de verdad dispara el gasto (se reenvía entera en cada mensaje)
+const ctxs = [];
+try {
+  for (const l of fs.readFileSync(CONTEXT, 'utf8').split('\n')) {
+    if (!l) continue;
+    try { const r = JSON.parse(l); if (r.t >= since && r.tok) ctxs.push(r.tok); } catch { /* línea rota */ }
+  }
+} catch { /* sin registro todavía */ }
+ctxs.sort((a, b) => a - b);
+const ctxP50 = ctxs.length ? ctxs[Math.floor((ctxs.length - 1) / 2)] : 0;
+const ctxMax = ctxs.length ? ctxs[ctxs.length - 1] : 0;
 
 const tot = (r) => r.i + r.o + r.r + r.c;
 const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
@@ -63,7 +75,7 @@ const times = [...new Set(durs.map((d) => d.k))].map((k) => {
 }).sort((a, b) => b.n - a.n);
 
 if (flag('--json')) {
-  console.log(JSON.stringify({ dias, sesiones: sessions, tokens: total, delegado: subTotal, porModelo: byTier, porAgente: Object.fromEntries(Object.entries(byAgent).map(([k, v]) => [k, { ...v, models: [...v.models] }])), indice: index, tiempos: times }, null, 2));
+  console.log(JSON.stringify({ dias, sesiones: sessions, tokens: total, delegado: subTotal, contexto: { turnos: ctxs.length, mediana: ctxP50, maximo: ctxMax }, porModelo: byTier, porAgente: Object.fromEntries(Object.entries(byAgent).map(([k, v]) => [k, { ...v, models: [...v.models] }])), indice: index, tiempos: times }, null, 2));
   process.exit(0);
 }
 
@@ -83,6 +95,10 @@ const cheap = (byTier.haiku?.main || 0) + (byTier.haiku?.sub || 0);
 console.log(`\nDelegado en subagentes: ${Math.round((subTotal / total) * 100)}% de los tokens · en Haiku: ${Math.round((cheap / total) * 100)}%`);
 if (index) console.log(`Coste relativo con tus precios: ${(index.ratio * 100).toFixed(0)}% de lo que habría costado todo en ${index.mainTier} (≈ ${Math.round((1 - index.ratio) * 100)}% menos; cuenta todos los tipos de token por igual, es una estimación).`);
 else console.log('Para un índice de coste: añade --precios haiku=1,sonnet=3,opus=15 (pon los precios reales de tu plan).');
+}
+
+if (ctxs.length) {
+  console.log(`\nContexto por turno (lo que se reenvía en cada mensaje): mediana ${fmt(ctxP50)} · máximo ${fmt(ctxMax)} · ${ctxs.length} respuestas${ctxMax > 220000 ? ' — pasa de 220k: conviene compactar antes' : ''}`);
 }
 
 if (Object.keys(byAgent).length) {

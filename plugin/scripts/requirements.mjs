@@ -18,7 +18,7 @@ export function readRequirements(kind = 'requirements') {
     .map((l) => { const [repo, plugin] = l.split(/\s+/); return { repo, plugin, name: plugin.split('@')[0] }; });
 }
 
-export const claude = (args) => spawnSync(`claude plugin ${args}`, { shell: true, encoding: 'utf8', timeout: 120000 });
+const claude = (args) => spawnSync(`claude plugin ${args}`, { shell: true, encoding: 'utf8', timeout: 120000 });
 
 // null = no se pudo consultar (claude no está en el PATH, etc.): en ese caso nadie debe instalar a ciegas
 export function installedIds() {
