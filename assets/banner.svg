@@ -1,77 +1,56 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-label="claudeop: Claude Code más rápido, más barato y sin tocar nada">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-label="claudeop: Claude Code más rápido, más barato y sin tocar nada. Reparte el trabajo entre Haiku, Sonnet y Opus, vigila el contexto y mide el ahorro.">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b0f19"/>
-      <stop offset="1" stop-color="#14102a"/>
-    </linearGradient>
-    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#34d399"/>
-      <stop offset="0.5" stop-color="#fbbf24"/>
-      <stop offset="1" stop-color="#f87171"/>
-    </linearGradient>
-    <linearGradient id="scan" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#34d399" stop-opacity="0"/>
-      <stop offset="0.5" stop-color="#34d399" stop-opacity="0.10"/>
-      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
-    </linearGradient>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.045" stroke-width="1"/>
-    </pattern>
-    <filter id="glow" x="-20%" y="-50%" width="140%" height="200%">
-      <feGaussianBlur stdDeviation="6" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b0f19"/><stop offset="1" stop-color="#171132"/></linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#34d399"/><stop offset="0.5" stop-color="#fbbf24"/><stop offset="1" stop-color="#f87171"/></linearGradient>
+    <linearGradient id="scan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34d399" stop-opacity="0"/><stop offset="0.5" stop-color="#34d399" stop-opacity="0.09"/><stop offset="1" stop-color="#34d399" stop-opacity="0"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.045"/></pattern>
+    <filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <clipPath id="clip"><rect width="1200" height="380" rx="22"/></clipPath>
     <style>
-      .mono { font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'SFMono-Regular', Menlo, monospace; }
+      .sans { font-family: -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
+      .mono { font-family: 'JetBrains Mono','Cascadia Code',Consolas,Menlo,monospace; }
       .blink { animation: blink 1.1s steps(1) infinite; }
       @keyframes blink { 50% { opacity: 0; } }
-      .sweep { animation: sweep 5s linear infinite; }
-      @keyframes sweep { from { transform: translateY(-120px); } to { transform: translateY(380px); } }
+      .sweep { animation: sweep 6s linear infinite; }
+      @keyframes sweep { from { transform: translateY(-140px); } to { transform: translateY(400px); } }
       .pulse { animation: pulse 2.4s ease-in-out infinite; }
       @keyframes pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
       .d2 { animation-delay: .8s; } .d3 { animation-delay: 1.6s; }
     </style>
   </defs>
 
-  <rect width="1200" height="340" rx="22" fill="url(#bg)"/>
-  <rect width="1200" height="340" rx="22" fill="url(#grid)"/>
-  <rect class="sweep" width="1200" height="120" fill="url(#scan)"/>
-  <rect x="1" y="1" width="1198" height="338" rx="21" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+  <rect width="1200" height="380" rx="22" fill="url(#bg)"/>
+  <rect width="1200" height="380" rx="22" fill="url(#grid)"/>
+  <g clip-path="url(#clip)"><rect class="sweep" width="1200" height="140" fill="url(#scan)"/></g>
+  <rect x="1" y="1" width="1198" height="378" rx="21" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
 
-  <!-- barra de ventana -->
-  <circle cx="34" cy="32" r="6" fill="#f87171"/>
-  <circle cx="56" cy="32" r="6" fill="#fbbf24"/>
-  <circle cx="78" cy="32" r="6" fill="#34d399"/>
-  <text x="106" y="37" class="mono" font-size="14" fill="#7c86a2">~/proyecto — claude</text>
+  <!-- izquierda: título y promesa -->
+  <text x="60" y="140" class="sans" font-size="92" font-weight="800" fill="url(#title)" filter="url(#glow)">claudeop<tspan class="blink" fill="#34d399">▌</tspan></text>
+  <text x="62" y="190" class="sans" font-size="31" font-weight="700" fill="#f4f6fb">Claude Code más rápido, más barato</text>
+  <text x="62" y="228" class="sans" font-size="31" font-weight="700" fill="#f4f6fb">y sin que toques nada.</text>
 
-  <!-- título -->
-  <text x="60" y="152" class="mono" font-size="86" font-weight="800" fill="url(#title)" filter="url(#glow)">⚡ claudeop<tspan class="blink" fill="#34d399">▌</tspan></text>
-
-  <text x="62" y="196" class="mono" font-size="25" fill="#e6e9f2">Claude Code, pero más rápido, más barato</text>
-  <text x="62" y="228" class="mono" font-size="25" fill="#e6e9f2">y sin que toques nada<tspan fill="#34d399">_</tspan></text>
-
-  <!-- modelos -->
-  <g class="mono" font-size="15">
-    <circle class="pulse" cx="72" cy="282" r="7" fill="#34d399"/>
-    <text x="88" y="287" fill="#a7f3d0">Haiku · lo mecánico</text>
-    <circle class="pulse d2" cx="300" cy="282" r="7" fill="#fbbf24"/>
-    <text x="316" y="287" fill="#fde68a">Sonnet · lo normal</text>
-    <circle class="pulse d3" cx="520" cy="282" r="7" fill="#f87171"/>
-    <text x="536" y="287" fill="#fecaca">Opus · solo lo difícil</text>
+  <g class="sans" font-size="20" fill="#c9d0e3">
+    <circle class="pulse" cx="72" cy="274" r="7" fill="#34d399"/><text x="92" y="281">Reparte el trabajo entre Haiku, Sonnet y Opus</text>
+    <circle class="pulse d2" cx="72" cy="308" r="7" fill="#fbbf24"/><text x="92" y="315">Vigila el contexto y recorta los tokens</text>
+    <circle class="pulse d3" cx="72" cy="342" r="7" fill="#f87171"/><text x="92" y="349">Instalas una vez y hablas como siempre</text>
   </g>
 
-  <!-- panel de métricas -->
+  <!-- derecha: una conversación de ejemplo -->
   <g class="mono">
-    <rect x="800" y="86" width="344" height="204" rx="14" fill="#0b0f19" fill-opacity="0.75" stroke="#ffffff" stroke-opacity="0.12"/>
-    <text x="824" y="116" font-size="13" fill="#7c86a2">$ claudeop --medido</text>
-    <text x="824" y="150" font-size="15" fill="#e6e9f2">subagente (arranque)</text>
-    <text x="1120" y="150" font-size="15" fill="#34d399" text-anchor="end">~6k tok</text>
-    <text x="824" y="182" font-size="15" fill="#e6e9f2">tope de agentes</text>
-    <text x="1120" y="182" font-size="15" fill="#fbbf24" text-anchor="end">6 / petición</text>
-    <text x="824" y="214" font-size="15" fill="#e6e9f2">autocompactado</text>
-    <text x="1120" y="214" font-size="15" fill="#fbbf24" text-anchor="end">200k tok</text>
-    <text x="824" y="246" font-size="15" fill="#e6e9f2">hooks que llaman a un modelo</text>
-    <text x="1120" y="246" font-size="15" fill="#34d399" text-anchor="end">0</text>
-    <text x="824" y="276" font-size="13" fill="#7c86a2">instalar y hablar. nada más.</text>
+    <rect x="720" y="46" width="430" height="288" rx="16" fill="#0b0f19" fill-opacity="0.82" stroke="#ffffff" stroke-opacity="0.16"/>
+    <circle cx="746" cy="72" r="6" fill="#f87171"/><circle cx="766" cy="72" r="6" fill="#fbbf24"/><circle cx="786" cy="72" r="6" fill="#34d399"/>
+    <text x="814" y="77" font-size="14" fill="#7c86a2">una petición normal</text>
+
+    <text x="744" y="122" font-size="18" fill="#34d399">❯</text>
+    <text x="768" y="122" font-size="18" fill="#f4f6fb">arregla el login y optimiza</text>
+    <text x="744" y="156" font-size="16" fill="#fde68a">⏱ ~4–12 min</text>
+
+    <text x="744" y="196" font-size="16" fill="#a7f3d0">● explorador</text><text x="1128" y="196" font-size="15" fill="#34d399" text-anchor="end">Haiku</text>
+    <text x="744" y="226" font-size="16" fill="#fde68a">● especialista</text><text x="1128" y="226" font-size="15" fill="#fbbf24" text-anchor="end">Sonnet</text>
+    <text x="744" y="256" font-size="16" fill="#fde68a">● revisor</text><text x="1128" y="256" font-size="15" fill="#fbbf24" text-anchor="end">Sonnet</text>
+
+    <line x1="744" y1="276" x2="1126" y2="276" stroke="#ffffff" stroke-opacity=".12"/>
+    <text x="744" y="308" font-size="17" fill="#34d399" font-weight="700">✓ hecho</text>
+    <text x="1128" y="308" font-size="14" fill="#7c86a2" text-anchor="end">ningún comando escrito</text>
   </g>
 </svg>

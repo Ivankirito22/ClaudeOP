@@ -5,7 +5,7 @@
 <br>
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.7.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.7.1-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Dependencias](https://img.shields.io/badge/dependencias-0-0ea5e9?style=for-the-badge)](package.json)
 [![Tests](https://img.shields.io/badge/tests-120%2B-8b5cf6?style=for-the-badge)](test/plugin.mjs)
@@ -13,11 +13,21 @@
 
 **Instalas una vez. Hablas como siempre. El plugin reparte el trabajo entre modelos, vigila el contexto y mide lo que ahorra.**
 
-[Instalar](#-instalar) · [Actualizar](#-actualizar) · [Por qué](#-por-qué-existe) · [Arquitectura](#-arquitectura) · [Capas de ahorro](#-capas-de-ahorro) · [Agentes y flujos](#-agentes-y-flujos) · [Instala solo](#-lo-que-instala-solo) · [Ajustes](#-ajustes) · [FAQ](#-faq)
+[Instalar](#-instalar) · [Actualizar](#-actualizar) · [Por qué](#-por-qué-existe) · [Cómo funciona](#-cómo-funciona) · [Capas de ahorro](#-capas-de-ahorro) · [Agentes y flujos](#-agentes-y-flujos) · [Instala solo](#-lo-que-instala-solo) · [Ajustes](#-ajustes) · [FAQ](#-faq)
 
 </div>
 
 ---
+
+## 👋 ¿Qué es?
+
+Un plugin para **Claude Code**. Lo instalas una vez y no tienes que aprender nada:
+
+| | |
+|---|---|
+| 🧠 **Reparte el trabajo** | Lo fácil lo hace un modelo barato (Haiku), lo normal uno medio (Sonnet) y solo lo difícil el caro (Opus). Así pagas menos y acaba antes. |
+| 🛡️ **Vigila el gasto** | Frena lo que dispara los tokens: conversaciones enormes, archivos gigantes, demasiados ayudantes a la vez. |
+| 📊 **Lo mide** | Te dice cuánto tardará cada tarea y cuánto has gastado y ahorrado de verdad. |
 
 ## 🚀 Instalar
 
@@ -83,18 +93,27 @@ Medido sobre sesiones reales de Claude Code (Windows 11, transcripts propios, `c
 
 > **La lección:** no se gasta por pensar mucho, se gasta por **arrastrar contexto**. Por eso `claudeop` no solo reparte trabajo: también **recorta, frena y mide el contexto**.
 
----
-
-## 🔧 Arquitectura
-
-Ningún hook llama a un modelo: son scripts Node de ~90 ms, sin dependencias. Quien decide delegar sigue siendo Claude; el plugin le da la receta, comprueba, frena y mide. Los recuadros amarillos son las capas de ahorro.
-
 <div align="center">
-<img src="assets/architecture.svg" alt="Arquitectura de claudeop: entrada, hooks, Claude principal, subagentes Haiku/Sonnet/Opus y medición" width="100%">
+<img src="assets/savings.svg" alt="Gráfico: sin tope el contexto crece hasta 450k tokens por mensaje; con autocompactado a 200k se compacta y vuelve a empezar" width="100%">
 </div>
 
+---
+
+## 🔧 Cómo funciona
+
+<div align="center">
+<img src="assets/architecture.svg" alt="Cómo funciona claudeop: 1 tú pides, 2 Claude decide, 3 los ayudantes Haiku, Sonnet y Opus trabajan, 4 te cuenta el resultado; los vigilantes protegen, limitan, vigilan el contexto y miden" width="100%">
+</div>
+
+1. **Tú pides** lo que quieres, con tus palabras. Sin comandos.
+2. **Claude decide** cómo hacerlo y a quién le toca cada parte. Te dice cuánto va a tardar.
+3. **Los ayudantes trabajan.** Cada uno en el modelo justo: el barato para lo fácil, el caro solo cuando hace falta. Si dos tareas están relacionadas, las hace el mismo ayudante; si son independientes, trabajan a la vez.
+4. **Te lo cuenta** en pocas líneas, comprobado, y te avisa cuando termina.
+
+Mientras tanto, **los vigilantes** miran cada paso. Son scripts pequeños (no usan IA, no gastan tokens, ~90 ms) que protegen lo peligroso, limitan los ayudantes, vigilan el tamaño de la conversación y miden lo que pasa.
+
 <details>
-<summary><b>Los hooks, uno a uno</b></summary>
+<summary><b>Para curiosos: los vigilantes (hooks) uno a uno</b></summary>
 
 | Evento | Script | Qué hace |
 |---|---|---|
@@ -272,7 +291,7 @@ plugin/                       lo que se instala
 │   ├── ctx · eta · flows · intent · stack · lib · data     piezas comunes
 │   └── stats · doctor                                      informes
 └── REQUIREMENTS.md           lo que se instala solo
-assets/                       banner.svg y architecture.svg (las imágenes de este README)
+assets/                       banner, architecture y savings (.svg de este README)
 .claude-plugin/               marketplace (apunta a ./plugin)
 install.ps1 · install.sh      instaladores de un comando
 test/plugin.mjs               120+ comprobaciones

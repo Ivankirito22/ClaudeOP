@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-label="Gráfico: sin tope, una sesión larga llega a reenviar 450 mil tokens en cada mensaje; con el autocompactado a 200 mil, el contexto nunca pasa de ese tope.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b0f19"/><stop offset="1" stop-color="#14102a"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.04"/></pattern>
+    <linearGradient id="redfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f87171" stop-opacity=".28"/><stop offset="1" stop-color="#f87171" stop-opacity="0"/></linearGradient>
+    <style>
+      .sans { font-family: -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
+      .mono { font-family: 'JetBrains Mono','Cascadia Code',Consolas,Menlo,monospace; }
+      .pulse { animation: pulse 2s ease-in-out infinite; }
+      @keyframes pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+    </style>
+  </defs>
+  <rect width="1200" height="520" rx="22" fill="url(#bg)"/>
+  <rect width="1200" height="520" rx="22" fill="url(#grid)"/>
+  <rect x="1" y="1" width="1198" height="518" rx="21" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+
+  <text x="50" y="62" class="sans" font-size="32" font-weight="800" fill="#f4f6fb">Por qué un tope en el contexto ahorra tanto</text>
+  <text x="50" y="94" class="sans" font-size="19" fill="#aab3cc">Cada mensaje reenvía TODA la conversación anterior, así que cuanto más larga, más cuesta cada mensaje.</text>
+
+  <!-- ejes: y = 360 - tokens/500k*230  (0 → 360, 200k → 268, 450k → 153) -->
+  <g class="mono" font-size="15" fill="#7c86a2">
+    <line x1="120" y1="360" x2="1150" y2="360" stroke="#ffffff" stroke-opacity=".25"/>
+    <line x1="120" y1="153" x2="1150" y2="153" stroke="#ffffff" stroke-opacity=".08"/>
+    <line x1="120" y1="268" x2="1150" y2="268" stroke="#34d399" stroke-opacity=".7" stroke-dasharray="8 7"/>
+    <text x="108" y="366" text-anchor="end">0</text>
+    <text x="108" y="274" text-anchor="end" fill="#a7f3d0">200k</text>
+    <text x="108" y="159" text-anchor="end">450k</text>
+  </g>
+  <text x="120" y="130" class="sans" font-size="16" fill="#7c86a2">tokens que se reenvían en cada mensaje</text>
+  <text x="1150" y="392" class="sans" font-size="16" fill="#7c86a2" text-anchor="end">mensajes de la sesión →</text>
+
+  <!-- sin tope (medido) -->
+  <path d="M120 329 L1150 153 L1150 360 L120 360 Z" fill="url(#redfill)"/>
+  <path class="draw" d="M120 329 L1150 153" stroke="#f87171" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <circle class="pulse" cx="1150" cy="153" r="9" fill="#f87171"/>
+  <text x="640" y="206" class="sans" font-size="21" font-weight="800" fill="#fecaca" transform="rotate(-9.7 640 206)">Sin tope (medido): de 68k a 450k</text>
+
+  <!-- con autocompactado (esperado) -->
+  <path class="draw" d="M120 329 L482 268 L494 338 L902 268 L914 338 L1150 297" stroke="#34d399" stroke-width="5" fill="none" stroke-linejoin="round" stroke-linecap="round" style="animation-delay:.6s"/>
+  <text x="520" y="368" class="sans" font-size="21" font-weight="800" fill="#a7f3d0">Con autocompactado a 200k</text>
+  <text x="508" y="284" class="sans" font-size="16" fill="#a7f3d0">se compacta y</text><text x="508" y="304" class="sans" font-size="16" fill="#a7f3d0">vuelve a empezar</text>
+
+  <!-- leyenda -->
+  <rect x="50" y="424" width="1100" height="66" rx="14" fill="#0f1424" stroke="#ffffff" stroke-opacity=".14"/>
+  <circle cx="82" cy="457" r="8" fill="#f87171"/>
+  <text x="100" y="463" class="sans" font-size="18" fill="#c9d0e3">Rojo: lo que medimos en una sesión real larga (sin ningún tope).</text>
+  <circle cx="658" cy="457" r="8" fill="#34d399"/>
+  <text x="676" y="463" class="sans" font-size="18" fill="#c9d0e3">Verde: lo esperado con el tope (ilustración).</text>
+</svg>
