@@ -5,7 +5,7 @@
 <br>
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.7.1-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.8.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Dependencias](https://img.shields.io/badge/dependencias-0-0ea5e9?style=for-the-badge)](package.json)
 [![Tests](https://img.shields.io/badge/tests-120%2B-8b5cf6?style=for-the-badge)](test/plugin.mjs)
@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/Ivankirito22/ClaudeOP/main/install.
 Actualizar: `claude plugin update claudeop` · Desinstalar: `claude plugin uninstall claudeop`
 </details>
 
-**Y ya.** Abre Claude Code: en la primera sesión instala en segundo plano lo recomendado ([ver qué](#-lo-que-instala-solo)) y te pide reiniciar una vez. ¿Funciona? Dile **«revisa claudeop»** y ejecuta un diagnóstico.
+**Y ya.** Abre Claude Code: en la primera sesión instala en segundo plano [memoria, documentación al día, entendimiento de código y ahorro de tokens](#-lo-que-instala-solo) y te pide reiniciar una vez. ¿Funciona? Dile **«revisa claudeop»** y ejecuta un diagnóstico.
 
 ```text
 tú     ▸ limpia el código muerto y modela un cubo en 3D           (con faltas también vale)
@@ -187,21 +187,48 @@ Todos siguen el mismo esqueleto: **criterio de «hecho» → entender → planif
 
 ## 📦 Lo que instala solo
 
-La lista está en [`plugin/REQUIREMENTS.md`](plugin/REQUIREMENTS.md). Reglas: una vez, en segundo plano, sin bloquearte · no toca lo que ya tienes · lo que quites **no vuelve** · si falla, 3 intentos con 12 h entre ellos.
+La primera vez que abres Claude Code, `claudeop` instala **en segundo plano** lo siguiente y te pide reiniciar una vez. La lista vive en [`plugin/REQUIREMENTS.md`](plugin/REQUIREMENTS.md).
 
-| | Pieza | Qué aporta |
+**Reglas:** una sola vez · sin bloquearte · no toca lo que ya tienes · **lo que quites no vuelve** · si algo falla, 3 intentos con 12 h entre ellos · cada ajuste de `settings.json` solo se pone si no existía y deja copia `.bak`.
+
+### Plugins de Claude Code
+
+| | Plugin | Qué hace por ti | Coste de contexto |
+|---|---|---|---|
+| 🧠 | [**Claude-Mem**](https://github.com/thedotmack/claude-mem) | **Memoria entre sesiones.** Apunta lo que haces y en la siguiente sesión te devuelve solo lo relevante, en vez de empezar de cero. | ~2k tokens por mensaje |
+| 📚 | [**Context7**](https://github.com/upstash/context7) | **Documentación actualizada de las librerías**, de la versión exacta que usas. Claude consulta la doc real en vez de inventarse una API (menos errores y menos reintentos). Funciona sin clave. | 2 herramientas MCP |
+| 🔎 | **typescript-lsp** y **pyright-lsp** *(oficiales de Anthropic)* | **Entienden el código de verdad.** Claude va a la definición de una función, ve dónde se usa y ve los errores reales del lenguaje, en vez de leer archivos enteros. Instala solo el servidor de TypeScript/JavaScript y, si tienes Python, el de Pyright. | prácticamente nulo |
+
+### Herramientas y ajustes
+
+| | Pieza | Qué hace por ti |
 |---|---|---|
-| 🧠 | [**Claude-Mem**](https://github.com/thedotmack/claude-mem) | Memoria entre sesiones: guarda lo que haces y en la siguiente inyecta solo lo relevante. |
-| 🔁 | [**Pro Workflow**](https://github.com/rohitg00/pro-workflow) | Tus correcciones se guardan como reglas; `/wrap-up`, `/doctor`, vigilancia de git y secretos. |
-| ✂️ | [**rtk**](https://github.com/rtk-ai/rtk) | Comprime la salida de Bash. Solo un hook en `settings.json` (con copia `.bak`); se quita con `rtk init -g --uninstall`. |
-| 📟 | [**ccstatusline**](https://github.com/sirmalloc/ccstatusline) | Barra de estado con el **contexto en tokens**. Solo si no tienes ya una; versión fija. |
-| 🔄 | **Actualización automática** | `autoUpdate: true` para el marketplace de claudeop, solo si no lo habías decidido. |
-| 📉 | **Autocompactado** | `autoCompactWindow: 200000` en `settings.json`, solo si no lo tienes; se cambia con `/autocompact`. |
-| 💸 | [**ccusage**](https://github.com/ryoppippi/ccusage) | Sin instalar: Claude lo ejecuta con `npx` cuando preguntas cuánto gastas. |
+| ✂️ | [**rtk**](https://github.com/rtk-ai/rtk) | **Comprime la salida de los comandos** de Bash antes de que llegue al contexto *(60–90 % según su README)*. Solo añade un hook; se quita con `rtk init -g --uninstall`. |
+| 📟 | [**ccstatusline**](https://github.com/sirmalloc/ccstatusline) | **Barra de estado** con el contexto en tokens, para ver cuándo la conversación se hincha. Solo si no tienes ya una. |
+| 📉 | **Autocompactado a 200k** | Tope nativo al contexto (`autoCompactWindow`): cuando la conversación llega a 200k tokens se compacta sola. Se cambia con `/autocompact`. |
+| 🔄 | **Actualización automática** | Pone `autoUpdate` al marketplace de claudeop: al abrir Claude Code se actualiza el plugin solo ([más info](#-actualizar)). |
+| 💸 | [**ccusage**](https://github.com/ryoppippi/ccusage) | No se instala: cuando preguntas «¿cuánto gasto?», Claude lo ejecuta con `npx` y te da tokens y coste por día. |
 
-Opcionales (no se instalan solos, solapan con lo de arriba): [Auto Harness](https://github.com/redker56/auto-harness) y [Ars Contexta](https://github.com/agenticnotetaking/arscontexta); actívalos con `node plugin/scripts/install-requirements.mjs --optional`.
+### Cómo se ayudan entre sí
 
-> ⚠️ Son herramientas de terceros que ejecutan hooks en tu máquina: revisa su código si te importa. Desactivar todo: `CLAUDEOP_NO_INSTALL=1`; solo rtk/barra/autocompactado: `CLAUDEOP_NO_TOOLS=1`.
+- **Escribir bien a la primera:** Context7 aporta la API correcta y el LSP el código real → menos lecturas y menos reintentos.
+- **Gastar menos:** rtk comprime lo que sale de los comandos, el autocompactado corta la conversación en 200k y el freno de `claudeop` evita leer archivos enormes enteros.
+- **Recordar y medir:** Claude-Mem guarda lo hecho; ccstatusline y ccusage enseñan lo que gastas; `stats` lo cruza con lo delegado.
+- **Mismo criterio de seguridad:** `claudeop` confirma `git push` y comandos peligrosos; nada de lo anterior se salta esa protección.
+
+### Opcionales (no se instalan solos)
+
+Se activan con `node plugin/scripts/install-requirements.mjs --optional`. Van aparte porque solapan con algo que ya hay o **gastan tokens por su cuenta**:
+
+| Plugin | Qué hace | Por qué no es automático |
+|---|---|---|
+| [Pro Workflow](https://github.com/rohitg00/pro-workflow) | Tus correcciones se guardan como reglas; `/wrap-up`, `/doctor`, vigilancia de git. | ~3,6k tokens en **cada** mensaje y solapa con las protecciones y medidas de `claudeop`. |
+| [security-guidance](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/security-guidance) | Avisa de patrones inseguros al editar y revisa el diff con IA. | Su revisión con Opus **cuesta tokens** (~0,2 $ por revisión según su doc) y al arrancar monta un entorno Python. Si lo quieres: `SECURITY_REVIEW_MODEL=claude-sonnet-5-5` y `ENABLE_STOP_REVIEW=0`. |
+| [Playwright](https://github.com/microsoft/playwright-mcp) | Claude abre un navegador y prueba tu web. | Sus herramientas MCP están siempre cargadas: solo en proyectos web. |
+| code-review | Revisa un pull request con varios agentes. | `claudeop:revisor` ya revisa el diff local. |
+| [Auto Harness](https://github.com/redker56/auto-harness) · [Ars Contexta](https://github.com/agenticnotetaking/arscontexta) | Trabajo largo por sprints · un «segundo cerebro» de notas. | Solapan con los flujos de `claudeop` y con Claude-Mem. |
+
+> ⚠️ Son herramientas de terceros que ejecutan hooks o servidores en tu máquina: revisa su código si te importa. Context7 envía a `mcp.context7.com` el nombre de la librería y tu pregunta. Desactivar todo: `CLAUDEOP_NO_INSTALL=1`; solo herramientas y ajustes: `CLAUDEOP_NO_TOOLS=1`.
 
 ---
 

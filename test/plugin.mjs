@@ -113,7 +113,7 @@ assert.ok(t.includes('método general') || t.includes('Flujos:'), 'tarea sin flu
 const block = (kind) => fs.readFileSync(path.join(PLUGIN, 'REQUIREMENTS.md'), 'utf8').match(new RegExp('```' + kind + '\\r?\\n([\\s\\S]*?)```'))[1].split('\n').filter((l) => l.trim());
 const reqs = block('requirements');
 assert.equal(reqs.length, 2, 'REQUIREMENTS.md: 2 plugins automáticos (memoria y flujo)');
-assert.equal(block('optional').length, 2, 'REQUIREMENTS.md: 2 opcionales');
+assert.equal(block('optional').length, 6, 'REQUIREMENTS.md: 6 opcionales');
 
 const fake = path.join(tmp, 'fakebin');
 const calls = path.join(tmp, 'claude-calls.log');
@@ -130,10 +130,10 @@ const wait = async (cond) => { for (let i = 0; i < 60 && !cond(); i++) await new
 const log = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
 
 t = run('bootstrap.mjs', {}, boot);
-assert.ok(t && t.includes('pro-workflow'), 'avisa de lo que instala');
+assert.ok(t && t.includes('context7'), 'avisa de lo que instala');
 assert.ok(!t.includes('claude-mem'), 'no menciona lo que ya estaba instalado');
 assert.ok(!t.includes('auto-harness') && !t.includes('arscontexta'), 'los opcionales no se instalan solos');
-await wait(() => log().includes('install pro-workflow@pro-workflow'));
+await wait(() => log().includes('install context7@claude-plugins-official'));
 for (const r of reqs.slice(1)) {
   const [repo, plugin] = r.trim().split(/\s+/);
   assert.ok(log().includes(`plugin marketplace add ${repo}`) && log().includes(`plugin install ${plugin}`), `no instaló ${plugin}`);
@@ -144,7 +144,7 @@ assert.equal(run('bootstrap.mjs', {}, boot), null, 'no vuelve a instalar lo que 
 assert.equal(run('bootstrap.mjs', {}, { ...boot, CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-off'), CLAUDEOP_NO_INSTALL: '1' }), null, 'CLAUDEOP_NO_INSTALL=1 lo desactiva');
 assert.equal(run('bootstrap.mjs', {}, { CLAUDE_PLUGIN_DATA: path.join(tmp, 'data-noclaude') }), null, 'sin «claude» en el PATH no hace nada');
 const dry = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'install-requirements.mjs'), '--dry-run', '--optional'], { encoding: 'utf8', env: { ...env, ...boot } });
-assert.equal((dry.stdout.match(/instalaría/g) || []).length, 3, '--optional suma los 2 opcionales a lo que falta (pro-workflow + 2)');
+assert.equal((dry.stdout.match(/instalaría/g) || []).length, 7, '--optional suma los 6 opcionales a lo que falta (context7 + 6)');
 
 // ---- Protección: confirmación antes de lo que no se deshace ----
 for (const c of ['git push', 'git push origin main --force', 'git -C ../otro push', 'git reset --hard HEAD~1', 'git clean -fd', 'git branch -D viejo', 'cd x && git push', 'rm -rf ~', 'rm -rf /', 'rm -rf *']) {
@@ -188,13 +188,14 @@ assert.equal(tools.setStatusLine(sl).ok, false, 'un settings.json ilegible no se
 assert.equal(fs.readFileSync(sl, 'utf8'), '{roto');
 assert.ok(tools.hasRtkHook({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'rtk hook claude' }] }] } }), 'detecta el hook de rtk');
 assert.ok(!tools.hasRtkHook({ hooks: { PreToolUse: [{ hooks: [{ command: 'node guard.mjs' }] }] } }), 'sin hook de rtk');
-assert.deepEqual(tools.pending({}).map((x) => x.key), ['rtk', 'ccstatusline', 'autocompact', 'autoupdate'], 'al principio toca instalar las 4');
-assert.equal(tools.pending({ rtk: { ok: true }, ccstatusline: { ok: true }, autocompact: { ok: true }, autoupdate: { ok: true } }).length, 0, 'lo ya hecho no se repite (aunque el usuario lo quite)');
-assert.equal(tools.pending({ rtk: { ok: false, tries: 3, ts: 0 }, ccstatusline: { ok: false, tries: 1, ts: Date.now() }, autocompact: { ok: true }, autoupdate: { ok: true } }).length, 0, 'máx. 3 intentos y 12 h entre ellos');
-assert.equal(tools.pending({ rtk: { ok: false, tries: 1, ts: 0 }, ccstatusline: { ok: true }, autocompact: { ok: true }, autoupdate: { ok: true } }).length, 1, 'un fallo se reintenta pasadas 12 h');
+assert.deepEqual(tools.pending({}).map((x) => x.key), ['rtk', 'ccstatusline', 'autocompact', 'autoupdate', 'lsp'], 'al principio toca instalar las 5');
+assert.equal(tools.pending({ rtk: { ok: true }, ccstatusline: { ok: true }, autocompact: { ok: true }, autoupdate: { ok: true }, lsp: { ok: true } }).length, 0, 'lo ya hecho no se repite (aunque el usuario lo quite)');
+assert.equal(tools.pending({ rtk: { ok: false, tries: 3, ts: 0 }, ccstatusline: { ok: false, tries: 1, ts: Date.now() }, autocompact: { ok: true }, autoupdate: { ok: true }, lsp: { ok: true } }).length, 0, 'máx. 3 intentos y 12 h entre ellos');
+assert.equal(tools.pending({ rtk: { ok: false, tries: 1, ts: 0 }, ccstatusline: { ok: true }, autocompact: { ok: true }, autoupdate: { ok: true }, lsp: { ok: true } }).length, 1, 'un fallo se reintenta pasadas 12 h');
 const dryTools = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'tools.mjs'), '--dry-run'], { encoding: 'utf8', env });
-assert.equal((dryTools.stdout.match(/instalaría/g) || []).length, 4, '--dry-run solo muestra');
+assert.equal((dryTools.stdout.match(/instalaría/g) || []).length, 5, '--dry-run solo muestra');
 assert.equal(tools.disabled(), false);
+assert.deepEqual(tools.LSP.map((l) => l.bin), ['typescript-language-server', 'pyright-langserver'], 'los servidores de lenguaje que se instalan');
 // Autocompactado: pone el tope solo si no hay uno, y conserva el resto
 const ac = path.join(tmp, 'ac', 'settings.json');
 w(ac, JSON.stringify({ model: 'sonnet' }));

@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DATA, readJson, writeJson } from './data.mjs';
+import { installedIds, isInstalled, installOne } from './requirements.mjs';
 
 export const STATUSLINE = 'npx -y ccstatusline@2.2.32'; // versión fija: no ejecutamos "latest" en cada render
 const STAMP = path.join(DATA, 'tools.json');
@@ -31,6 +32,10 @@ function rtkPath() {
   return null;
 }
 
+const has = (c) => sh(process.platform === 'win32' ? `where ${c}` : `command -v ${c}`, 20000).status === 0;
+// En Windows «python» puede ser un atajo de la Microsoft Store que no ejecuta nada: se prueba de verdad
+const hasPython = () => sh('python --version', 20000).status === 0 || sh('py -3 --version', 20000).status === 0;
+
 export const hasRtkHook = (s) => /rtk hook/.test(JSON.stringify(s?.hooks || {}));
 
 function installRtk() {
@@ -47,6 +52,33 @@ function installRtk() {
   // Solo el hook (sin RTK.md ni nada en CLAUDE.md: no suma contexto); rtk guarda una copia .bak de settings.json
   const r = sh(`${bin} init -g --auto-patch --hook-only`);
   return { ok: r.status === 0 && hasRtkHook(readJson(SETTINGS(), {})), msg: (r.stderr || r.stdout || '').trim().split('\n').pop() };
+}
+
+// Servidores de lenguaje: Claude Code puede ir a la definición, ver usos y errores reales del lenguaje en vez de leer archivos enteros.
+// El plugin pesa unos KB (sin skills, agentes ni MCP) pero necesita el servidor en el PATH: se instala con npm si falta.
+export const LSP = [
+  { plugin: 'typescript-lsp', bin: 'typescript-language-server', npm: 'typescript-language-server typescript', python: false },
+  { plugin: 'pyright-lsp', bin: 'pyright-langserver', npm: 'pyright', python: true },
+];
+function installLsp() {
+  const ids = installedIds();
+  if (!ids) return { ok: false, msg: 'no se pudo consultar «claude plugin list»' };
+  const msgs = [];
+  let ok = true;
+  for (const l of LSP) {
+    if (l.python && !hasPython()) { msgs.push(`${l.plugin}: sin Python, se omite`); continue; }
+    if (!has(l.bin)) {
+      if (!has('npm')) { ok = false; msgs.push(`${l.plugin}: falta npm`); continue; }
+      sh(`npm install -g ${l.npm}`, 300000);
+      if (!has(l.bin)) { ok = false; msgs.push(`${l.plugin}: no se pudo instalar ${l.bin}`); continue; }
+    }
+    const r = { repo: 'anthropics/claude-plugins-official', plugin: `${l.plugin}@claude-plugins-official`, name: l.plugin };
+    if (isInstalled(ids, r)) { msgs.push(`${l.plugin}: ya estaba`); continue; }
+    const res = installOne(r);
+    if (!res.ok) ok = false;
+    msgs.push(`${l.plugin}: ${res.ok ? 'instalado' : res.msg}`);
+  }
+  return { ok, msg: msgs.join(' · ') };
 }
 
 // Pone una clave en settings.json SOLO si el usuario no la tiene: nunca se pisa lo suyo; copia .claudeop.bak antes de escribir
@@ -85,6 +117,7 @@ export const TOOLS = [
   { key: 'ccstatusline', label: 'barra de estado con el contexto en tokens', run: () => setStatusLine() },
   { key: 'autocompact', label: 'autocompactado a 200k tokens (tope al contexto por turno)', run: () => setAutoCompact() },
   { key: 'autoupdate', label: 'actualización automática de claudeop', run: () => setAutoUpdate() },
+  { key: 'lsp', label: 'servidores de lenguaje (TypeScript y Python)', run: installLsp },
 ];
 
 // Qué herramientas toca instalar ahora (nunca instaladas, o falladas con menos de 3 intentos y más de 12 h)
