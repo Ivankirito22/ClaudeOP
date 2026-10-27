@@ -19,5 +19,12 @@ export function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value));
 }
 
+// Id de sesión apto para nombre de archivo
+export const safeId = (id) => String(id || 'x').replace(/[^\w-]/g, '');
+// Lo que Claude Code envía al hook por stdin (lanza si no hay JSON: cada hook ya está envuelto en su try)
+export const readStdin = () => JSON.parse(fs.readFileSync(0, 'utf8'));
+// Texto que el hook le entrega a Claude como contexto
+export const emitHook = (event, text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }));
+
 // Estado pequeño por sesión (se limpia solo: ver track.mjs)
-export const sessionFile = (id) => path.join(DATA, `sess-${String(id || 'x').replace(/[^\w-]/g, '')}.json`);
+export const sessionFile = (id) => path.join(DATA, `sess-${safeId(id)}.json`);

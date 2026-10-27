@@ -5,11 +5,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { off, emitHook } from './data.mjs';
 import { disabled as toolsOff, pending as pendingTools, markStarted as markTools } from './tools.mjs';
 import { readRequirements, installedIds, isInstalled, readStamp, writeStamp, DATA, LOG } from './requirements.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const emit = (text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));
 const HORAS_12 = 12 * 3600 * 1000;
 
 // Herramientas externas (rtk, barra de estado): se lanzan aparte, también en segundo plano. Devuelve cuáles empezaron.
@@ -26,7 +26,7 @@ function startTools() {
 
 // Plugins recomendados que faltan: los instala en segundo plano. Devuelve sus nombres.
 function startPlugins() {
-  if (/^(off|0|false)$/i.test(process.env.CLAUDEOP || '') || /^(1|true|on)$/i.test(process.env.CLAUDEOP_NO_INSTALL || '')) return [];
+  if (off() || /^(1|true|on)$/i.test(process.env.CLAUDEOP_NO_INSTALL || '')) return [];
   const stamp = readStamp();
   const reqs = readRequirements();
   // Caso normal (todo resuelto en una sesión anterior): ni siquiera se consulta la CLI de Claude (~1 s)
@@ -58,7 +58,7 @@ function main() {
   const plugins = startPlugins();
   if (!tools.length && !plugins.length) return;
   const what = [...plugins, ...tools].join(', ');
-  emit(`[claudeop] Se están instalando en segundo plano los recomendados que faltaban: ${what}. Dile al usuario en UNA línea que, cuando termine, reinicie la terminal y Claude Code para que carguen. Si algo falla, el motivo queda en ${LOG}.`);
+  emitHook('SessionStart', `[claudeop] Se están instalando en segundo plano los recomendados que faltaban: ${what}. Dile al usuario en UNA línea que, cuando termine, reinicie la terminal y Claude Code para que carguen. Si algo falla, el motivo queda en ${LOG}.`);
 }
 
 try { main(); } catch { /* un hook nunca debe romper la sesión */ }

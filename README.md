@@ -5,7 +5,7 @@
 <br>
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.9.0-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-1.9.1-2ea44f?style=for-the-badge)](plugin/.claude-plugin/plugin.json)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Dependencias](https://img.shields.io/badge/dependencias-0-0ea5e9?style=for-the-badge)](package.json)
 [![Tests](https://img.shields.io/badge/tests-120%2B-8b5cf6?style=for-the-badge)](test/plugin.mjs)
@@ -121,7 +121,7 @@ Mientras tanto, **los vigilantes** miran cada paso. Son scripts pequeños (no us
 | `SessionStart` | `session-start` | Da a Claude las reglas de reparto y lo que tienes instalado; le entrega la **memoria** de sesiones anteriores y los datos del proyecto (rama, comandos); retoma `estado.md`; tras compactar vuelve a dar las recetas. |
 | `SessionStart` | `bootstrap` | Instala en segundo plano plugins y herramientas que falten (solo al arrancar). |
 | `UserPromptSubmit` | `route` | Reconoce flujos y tecnologías; añade la nota con el ⏱ **solo si hay trabajo**; la receta de un flujo se da **una vez por sesión**; avisa al pasar de ~120k de contexto. |
-| `PreToolUse` | `guard` | Confirma comandos peligrosos · **tope de 6 subagentes por petición (agrupando lo relacionado)** · **frena una vez la lectura entera de archivos de más de 40 KB** · recuerda delegar tras 8 lecturas seguidas. |
+| `PreToolUse` | `guard` | Confirma comandos peligrosos · **tope de 6 subagentes por petición (agrupando lo relacionado)** · **frena una vez la lectura entera de archivos de más de 40 KB** · recuerda delegar tras 8 lecturas seguidas. Solo se ejecuta en Bash, PowerShell, Read y Agent (no en Grep ni Glob: se ahorra un proceso por búsqueda). |
 | `SubagentStop` | `track` | Anota los tokens de cada subagente por modelo (asíncrono). |
 | `Stop` | `track` · `notify` | Anota tokens, duración, **tamaño del contexto** y la **ficha de la sesión** (memoria); avisa de «terminado» si fue largo (asíncronos). |
 | `StopFailure` · `Notification` | `notify` | Avisa si Claude se detiene por un error o espera un permiso. |
@@ -147,6 +147,8 @@ Cada capa ataca un sitio distinto donde se van los tokens. Todas son automática
 | 10 | **Medición** | `stats` (tokens, delegado, contexto mediana/máximo) y `ccusage` (coste por día) | para comparar antes y después |
 
 **Coste propio, medido:** reglas de la sesión ~1.100 tokens (una vez) · descripciones de los 12 agentes ~375 por turno · nota de una tarea ~400–500, solo si hay trabajo (un «gracias» o una pregunta: 0).
+
+**Velocidad, medida** (mediana en Windows 11): arrancar Node ya cuesta ~52 ms y cada hook suma entre 10 y 40 ms: `guard` ~63 ms por llamada a una herramienta, `route` ~81–91 ms por mensaje, `session-start` ~123 ms por sesión, `track` ~99 ms al terminar (asíncrono, no frena). Los módulos son pequeños: lo que pesa es el arranque del proceso, no el código.
 
 ---
 

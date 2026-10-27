@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { DATA, readJson, writeJson } from './data.mjs';
+import { DATA, off, readJson, writeJson } from './data.mjs';
 import { installedIds, isInstalled, installOne } from './requirements.mjs';
 
 export const STATUSLINE = 'npx -y ccstatusline@2.2.32'; // versión fija: no ejecutamos "latest" en cada render
@@ -17,7 +17,7 @@ const HORAS_12 = 12 * 3600 * 1000;
 const CFG = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const SETTINGS = () => path.join(CFG(), 'settings.json');
 
-export const disabled = () => /^(1|true|on)$/i.test(process.env.CLAUDEOP_NO_TOOLS || '') || /^(1|true|on)$/i.test(process.env.CLAUDEOP_NO_INSTALL || '') || /^(off|0|false)$/i.test(process.env.CLAUDEOP || '');
+export const disabled = () => /^(1|true|on)$/i.test(process.env.CLAUDEOP_NO_TOOLS || '') || /^(1|true|on)$/i.test(process.env.CLAUDEOP_NO_INSTALL || '') || off();
 
 const sh = (cmd, timeout = 180000) => spawnSync(cmd, { shell: true, encoding: 'utf8', timeout });
 
@@ -95,7 +95,7 @@ export const setStatusLine = (file = SETTINGS()) => setIfAbsent(file, 'statusLin
 
 // Autocompactado nativo de Claude Code (ajuste `autoCompactWindow`): el umbral es el MENOR entre este valor y la ventana del modelo,
 // así que 200k nunca pasa de largo. Una sesión sin tope llegó a 450k tokens POR TURNO. Se cambia luego con /autocompact.
-export const AUTOCOMPACT = 200000;
+const AUTOCOMPACT = 200000;
 
 // Claude Code solo actualiza solos los marketplaces oficiales; los de terceros necesitan `autoUpdate: true` en settings.json.
 // Con esto, al abrir Claude Code se comprueba si hay versión nueva de claudeop y se instala (se aplica al reiniciar).
@@ -112,7 +112,7 @@ export function setAutoUpdate(file = SETTINGS()) {
 }
 export const setAutoCompact = (file = SETTINGS()) => setIfAbsent(file, 'autoCompactWindow', AUTOCOMPACT, 'autocompactado');
 
-export const TOOLS = [
+const TOOLS = [
   { key: 'rtk', label: 'rtk (comprime la salida de los comandos)', run: installRtk },
   { key: 'ccstatusline', label: 'barra de estado con el contexto en tokens', run: () => setStatusLine() },
   { key: 'autocompact', label: 'autocompactado a 200k tokens (tope al contexto por turno)', run: () => setAutoCompact() },

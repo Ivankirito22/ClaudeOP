@@ -4,7 +4,7 @@
 //   node track.mjs main  ← Stop (lee el transcript de la sesión y anota lo nuevo desde la última vez)
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA, USAGE, CONTEXT, off, readJson, writeJson, sessionFile } from './data.mjs';
+import { DATA, USAGE, CONTEXT, off, readJson, writeJson, sessionFile, safeId, readStdin } from './data.mjs';
 import { recordDuration } from './eta.mjs';
 import { contextTokens } from './ctx.mjs';
 import { updateSession } from './memory.mjs';
@@ -68,7 +68,7 @@ function sweep() {
 function main() {
   if (off()) return;
   const kind = process.argv[2];
-  const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+  const input = readStdin();
   const t = Date.now();
 
   if (kind === 'sub') {
@@ -76,7 +76,7 @@ function main() {
     append(Object.entries(usageByModel(input.agent_transcript_path)).map(([m, u]) => ({ t, s: input.session_id, k: 'sub', a: agent, m, ...u })));
   } else if (kind === 'main') {
     const now = usageByModel(input.transcript_path);
-    const stateFile = path.join(DATA, `main-${String(input.session_id).replace(/[^\w-]/g, '')}.json`);
+    const stateFile = path.join(DATA, `main-${safeId(input.session_id)}.json`);
     const prev = readJson(stateFile, {});
     const rows = [];
     for (const [m, u] of Object.entries(now)) {

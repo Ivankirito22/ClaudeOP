@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { DATA, USAGE, readJson } from './data.mjs';
+import { DATA, USAGE, off, readJson } from './data.mjs';
 import { readRequirements, installedIds, isInstalled, readStamp } from './requirements.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,7 +65,7 @@ if (process.argv.includes('--notify')) {
   const n = spawnSync(process.execPath, [path.join(SCRIPTS, 'notify.mjs'), 'test'], { encoding: 'utf8' });
   console.log(`  ${n.stdout.trim()}`);
 } else console.log('  · Para probar los avisos del sistema: node scripts/notify.mjs test');
-if (/^(off|0|false)$/i.test(process.env.CLAUDEOP || '')) warn('CLAUDEOP=off: el plugin está apagado');
+if (off()) warn('CLAUDEOP=off: el plugin está apagado');
 
 console.log(`\n${fails ? `✖ ${fails} problema${fails > 1 ? 's' : ''}` : '✔ Todo correcto'}${warns ? ` · ${warns} aviso${warns > 1 ? 's' : ''}` : ''}`);
 process.exit(fails ? 1 : 0);

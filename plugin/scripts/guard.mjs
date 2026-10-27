@@ -4,7 +4,7 @@
 // Desactivar: CLAUDEOP_GUARD=off (solo 1), CLAUDEOP=off (todo el plugin).
 import fs from 'node:fs';
 import path from 'node:path';
-import { off, readJson, writeJson, sessionFile } from './data.mjs';
+import { off, readJson, writeJson, sessionFile, readStdin } from './data.mjs';
 
 const READS_BEFORE_NUDGE = 8;
 const MAX_AGENTS = 6; // CLAUDEOP_MAX_AGENTS lo cambia
@@ -34,7 +34,7 @@ export function riskOf(command) {
 
 function main() {
   if (off()) return;
-  const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+  const input = readStdin();
   const tool = input.tool_name;
 
   if (tool === 'Bash' || tool === 'PowerShell') {
@@ -81,7 +81,7 @@ function main() {
   st.reads += 1;
   if (st.reads >= READS_BEFORE_NUDGE) {
     st.nudged = true;
-    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `[claudeop] Llevas ${st.reads} lecturas/búsquedas tú solo en esta petición. Para seguir explorando, delega en el subagente claudeop:explorador (Haiku, más barato) con la pregunta concreta y trabaja con su resumen.` } }));
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `[claudeop] Llevas ${st.reads} lecturas tú solo en esta petición. Para seguir explorando, delega en el subagente claudeop:explorador (Haiku, más barato) con la pregunta concreta y trabaja con su resumen.` } }));
   }
   writeJson(file, st);
 }

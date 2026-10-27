@@ -34,7 +34,7 @@ const PREF = /\b(recuerda que|ten en cuenta|ten presente|prefiero|me gusta(?!r[i
 
 export const redact = (s) => SECRETS.reduce((t, re) => t.replace(re, (m) => (m.startsWith('://') ? '://«secreto»@' : '«secreto»')), String(s));
 const clip = (s, n) => { const t = String(s).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
-export const enabled = () => !off() && !/^(off|0|false)$/i.test(process.env.CLAUDEOP_MEMORY || '');
+const enabled = () => !off() && !/^(off|0|false)$/i.test(process.env.CLAUDEOP_MEMORY || '');
 
 const projectKey = (cwd) => `${path.basename(cwd || 'x').replace(/[^\w-]/g, '').slice(0, 30) || 'proyecto'}-${crypto.createHash('sha1').update(String(cwd || '').toLowerCase()).digest('hex').slice(0, 8)}`;
 const projectFile = (cwd) => path.join(DIR, `${projectKey(cwd)}.json`);
@@ -205,5 +205,3 @@ export function recall(cwd, { max = 4, current = null } = {}) {
     return out.join('\n').slice(0, 1800);
   } catch { return ''; }
 }
-
-export const sessionCount = (cwd) => (readJson(projectFile(cwd), { sessions: [] }).sessions || []).length;

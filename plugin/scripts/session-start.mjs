@@ -4,12 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FLOW_CATALOG } from './flows.mjs';
 import { NAME, buildCatalog, frontmatter } from './lib.mjs';
-import { readJson, writeJson, sessionFile } from './data.mjs';
+import { off, readJson, writeJson, sessionFile, readStdin, emitHook } from './data.mjs';
 import { recall } from './memory.mjs';
 import { projectFacts } from './facts.mjs';
 
 const ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const emit = (text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));
 const SEMANA = 7 * 24 * 3600 * 1000;
 
 function roster() {
@@ -34,12 +33,12 @@ function pendingState(cwd) {
 }
 
 function main() {
-  if (/^(off|0|false)$/i.test(process.env.CLAUDEOP || '')) return;
+  if (off()) return;
   let cwd = process.cwd();
   let source = 'startup';
   let sid = null;
   try {
-    const i = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const i = readStdin();
     cwd = i.cwd || cwd; source = i.source || source; sid = i.session_id || null;
     if (i.session_id && /compact|clear/.test(source)) { const sf = sessionFile(i.session_id); const st = readJson(sf); if (st?.sent) writeJson(sf, { ...st, sent: [] }); }
   } catch { /* sin stdin */ }
@@ -66,7 +65,7 @@ Seguridad: git push, reset --hard y clean piden confirmación al usuario (hook);
 Tokens: no releas archivos; Grep/Glob antes de Read con offset/limit; no imprimas archivos ni logs enteros; respuestas cortas, resultado primero.
 Si preguntan cuánto ahorra o delega: \`node "${ROOT}/scripts/stats.mjs"\`; coste real en tokens y dinero por día: npx -y ccusage@20.0.45 daily. Si algo del plugin no va: \`node "${ROOT}/scripts/doctor.mjs"\` y resume el resultado.${cat.stack.summary ? `\nStack: ${cat.stack.summary}.` : ''}${mcp.length ? `\nMCP del usuario: ${mcp.join(', ')}. Si la tarea es de su herramienta, úsalos en vez de improvisar scripts (si salen diferidos, cárgalos con ToolSearch).` : ''}
 También hay ${cat.skills.length} skills/comandos, ${cat.agents.length} agentes y ${viaPlugins} MCP de plugins: cada nota te indica los que encajan.${[projectFacts(cwd), recall(cwd, { current: sid })].filter(Boolean).map((x) => `\n${x}`).join('')}${pendingState(cwd)}`;
-  emit(text);
+  emitHook('SessionStart', text);
 }
 
 try { main(); } catch { /* un hook nunca debe romper la sesión */ }

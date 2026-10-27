@@ -7,14 +7,13 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { detectStack } from './stack.mjs';
 import { norm } from './intent.mjs';
+import { DATA, readJson } from './data.mjs';
 
 export const NAME = 'claudeop';
 const HOME = os.homedir();
 const CFG = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
 const CFG_JSON = process.env.CLAUDE_CONFIG_DIR ? path.join(CFG, '.claude.json') : path.join(HOME, '.claude.json');
-const DATA = process.env.CLAUDE_PLUGIN_DATA || path.join(CFG, 'plugins', 'data', NAME);
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 const ls = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }); } catch { return []; } };
 

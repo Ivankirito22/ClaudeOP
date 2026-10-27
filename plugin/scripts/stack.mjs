@@ -3,6 +3,7 @@
 // herramientas para usar su MCP); el resto comparte el agente `especialista` y recibe su guía de estilo en la nota, solo cuando toca.
 import fs from 'node:fs';
 import path from 'node:path';
+import { readJson } from './data.mjs';
 
 // kw = palabras (sin tildes, en minúsculas) con las que lo reconocemos en lo que escribes; ext = extensiones que delatan el stack del proyecto.
 const spec = (tag, prompt, kw, ext = []) => ({ tag, prompt, kw, ext });
@@ -66,9 +67,6 @@ const nrm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-�
 // Qué especialistas tocan según lo que escribes (por palabras clave)
 export const specialistsFor = (text) => SPEC_KEYS.filter((k) => SPECIALISTS[k].kw.test(nrm(text)));
 
-function readJson(f) {
-  try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; }
-}
 function exists(...p) {
   try { return fs.existsSync(path.join(...p)); } catch { return false; }
 }

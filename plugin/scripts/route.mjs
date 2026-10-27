@@ -1,11 +1,10 @@
 // Hook UserPromptSubmit: lee lo que escribe el usuario, reconoce flujos, especialistas, MCP, skills y agentes que encajan
 // y se lo pasa a Claude como contexto. No bloquea ni cambia el mensaje. Preguntas y cambios pequeños: no añade nada.
-import fs from 'node:fs';
 import { FLOWS, GENERAL } from './flows.mjs';
 import { detectCmds, norm, MAX_FLOWS } from './intent.mjs';
 import { specialistsFor, SPEC_KEYS, AGENT_TECHS, SPECIALISTS, guideFor } from './stack.mjs';
 import { NAME, loadCatalog, queryStems, queryWords, rankItems, rankMcp } from './lib.mjs';
-import { readJson, writeJson, sessionFile } from './data.mjs';
+import { off, readJson, writeJson, sessionFile, readStdin, emitHook } from './data.mjs';
 import { estimate, range } from './eta.mjs';
 import { contextTokens, contextWarning } from './ctx.mjs';
 
@@ -14,7 +13,7 @@ let pendingWarn = '';
 let emitted = false;
 const emit = (text) => {
   emitted = true;
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [pendingWarn, text].filter(Boolean).join('\n') } }));
+  emitHook('UserPromptSubmit', [pendingWarn, text].filter(Boolean).join('\n'));
 };
 
 const SKIP_FLOWS = new Set(['/plugins']); // «el plugin» aquí casi siempre es otra cosa
@@ -35,9 +34,9 @@ function resourceLines(servers, skills, agents) {
 }
 
 function main() {
-  if (/^(off|0|false)$/i.test(process.env.CLAUDEOP || '')) return;
+  if (off()) return;
   let input = {};
-  try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { return; }
+  try { input = readStdin(); } catch { return; }
   const prompt = String(input.prompt || '').trim();
   const cwd = input.cwd || process.cwd();
   if (!prompt || prompt.startsWith('/')) return;

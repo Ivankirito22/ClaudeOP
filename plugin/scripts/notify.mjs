@@ -8,12 +8,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { DATA, off, readJson, writeJson, sessionFile } from './data.mjs';
+import { DATA, off, readJson, writeJson, sessionFile, safeId, readStdin } from './data.mjs';
 import { fmt } from './eta.mjs';
 
 const MIN_SEC = Number(process.env.CLAUDEOP_NOTIFY_MIN_SEC) || 20;
 const MINUTOS_10 = 10 * 60 * 1000;
-const notifyFile = (id) => path.join(DATA, `notify-${String(id || 'x').replace(/[^\w-]/g, '')}.json`);
+const notifyFile = (id) => path.join(DATA, `notify-${safeId(id)}.json`);
 
 // Qué avisar para cada situación (o null si no merece aviso)
 function describe(kind, input, st = {}, now = Date.now()) {
@@ -82,7 +82,7 @@ function main() {
     console.log(ok ? 'Aviso enviado.' : 'No se pudo enviar el aviso (¿notificaciones desactivadas o modo «No molestar»?).');
     return;
   }
-  const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+  const input = readStdin();
   const sf = notifyFile(input.session_id);
   const st = { ...readJson(sf, {}), t0: readJson(sessionFile(input.session_id), {}).t0 };
   const msg = describe(kind, input, st);

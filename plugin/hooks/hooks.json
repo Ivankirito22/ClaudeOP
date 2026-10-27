@@ -23,7 +23,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Read|Grep|Glob|Agent|Task",
+        "matcher": "Bash|PowerShell|Read|Agent|Task",
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/guard.mjs\"", "timeout": 5 }
         ]
